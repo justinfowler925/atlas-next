@@ -19,6 +19,7 @@ from .store import Store
 
 
 UPDATE_RECORDS_ACTION = "salesforce.update_records"
+RECONCILE_UPDATE_ACTION = "salesforce.reconcile_update"
 ROLLBACK_UPDATE_ACTION = "salesforce.rollback_update"
 _API_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,79}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9]{15}(?:[A-Za-z0-9]{3})?$")
@@ -111,6 +112,20 @@ class RollbackUpdateRequest:
         return cls(work_id, reason)
 
 
+@dataclass(frozen=True)
+class ReconcileUpdateRequest:
+    update_work_id: str
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> ReconcileUpdateRequest:
+        if set(payload) != {"update_work_id"}:
+            raise ValueError("payload must contain only update_work_id")
+        work_id = payload["update_work_id"]
+        if not isinstance(work_id, str) or not work_id:
+            raise ValueError("update_work_id must be non-empty text")
+        return cls(work_id)
+
+
 class SalesforceUpdateRecords:
     """Atomically update a bounded Partial record set with before/after receipts."""
 
@@ -128,6 +143,7 @@ class SalesforceUpdateRecords:
         self.timeout_seconds = timeout_seconds
 
     def __call__(self, item: WorkItem) -> Outcome:
+        patch_applied = False
         try:
             request = UpdateRecordsRequest.from_payload(item.payload)
             if not self.partial_alias:
@@ -150,9 +166,29 @@ class SalesforceUpdateRecords:
             }
             response = self._composite_patch(request.object_api, request.records)
             _validate_patch_response(response, ids)
+            patch_applied = True
             after = self._query(request.object_api, ids, field_names)
             _require_expected(after, expected, field_names)
         except (ValueError, OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+            if patch_applied:
+                recovery = {
+                    "after": expected,
+                    "after_sha256": _records_hash(expected),
+                    "before": before,
+                    "before_sha256": _records_hash(before),
+                    "environment": "partial",
+                    "fields": field_names,
+                    "kind": "salesforce.update_records_reconciliation_required",
+                    "object": request.object_api,
+                    "patch_response_validated": True,
+                    "production_execution": False,
+                    "reason": request.reason,
+                    "record_ids": ids,
+                }
+                return Outcome.blocked(
+                    f"Salesforce PATCH succeeded but postcondition needs reconciliation: {exc}",
+                    [recovery],
+                )
             return Outcome.failed(f"Salesforce record update refused: {exc}")
 
         before_sha = _records_hash(before)
@@ -226,6 +262,106 @@ class SalesforceUpdateRecords:
         return json.loads(completed.stdout)
 
 
+class SalesforceReconcileUpdate(SalesforceUpdateRecords):
+    """Resolve a PATCH-success/postcheck-unknown update without issuing another write."""
+
+    def __init__(self, store: Store, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.store = store
+
+    def __call__(self, item: WorkItem) -> Outcome:
+        try:
+            request = ReconcileUpdateRequest.from_payload(item.payload)
+            updated = self.store.get(request.update_work_id)
+            if (
+                updated is None
+                or updated.state is not WorkState.BLOCKED
+                or updated.action != UPDATE_RECORDS_ACTION
+            ):
+                raise ValueError("blocked update receipt is missing")
+            recovery = next(
+                (
+                    row
+                    for row in updated.evidence
+                    if row.get("kind")
+                    == "salesforce.update_records_reconciliation_required"
+                ),
+                None,
+            )
+            if not isinstance(recovery, dict):
+                raise ValueError("blocked update has no recovery evidence")
+            object_api = recovery.get("object")
+            ids = recovery.get("record_ids")
+            fields = recovery.get("fields")
+            before = recovery.get("before")
+            expected = recovery.get("after")
+            if (
+                not isinstance(object_api, str)
+                or not _API_NAME_RE.fullmatch(object_api)
+                or not isinstance(ids, list)
+                or not isinstance(fields, list)
+                or not isinstance(before, dict)
+                or not isinstance(expected, dict)
+                or _records_hash(before) != recovery.get("before_sha256")
+                or _records_hash(expected) != recovery.get("after_sha256")
+            ):
+                raise ValueError("blocked update recovery evidence is invalid")
+            current = self._query(object_api, ids, fields)
+            current_hash = _records_hash(current)
+            before_hash = _records_hash(before)
+            expected_hash = _records_hash(expected)
+            if current_hash == expected_hash:
+                disposition = "applied"
+            elif current_hash == before_hash:
+                disposition = "not_applied"
+            else:
+                return Outcome.blocked(
+                    "Salesforce records differ from both before and intended states; "
+                    "reconciliation would overwrite newer work",
+                    [
+                        {
+                            "current_sha256": current_hash,
+                            "environment": "partial",
+                            "kind": RECONCILE_UPDATE_ACTION,
+                            "object": object_api,
+                            "production_execution": False,
+                            "record_count": len(ids),
+                            "status": "drifted",
+                            "update_work_id": request.update_work_id,
+                        }
+                    ],
+                )
+        except (ValueError, OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+            return Outcome.failed(f"Salesforce update reconciliation refused: {exc}")
+
+        result = {
+            "after": expected,
+            "after_sha256": expected_hash,
+            "before": before,
+            "before_sha256": before_hash,
+            "disposition": disposition,
+            "environment": "partial",
+            "fields": fields,
+            "object": object_api,
+            "record_count": len(ids),
+            "record_ids": ids,
+            "target_alias": self.partial_alias,
+            "update_work_id": request.update_work_id,
+        }
+        evidence = [
+            {
+                "environment": "partial",
+                "kind": RECONCILE_UPDATE_ACTION,
+                "mutation_applied": disposition == "applied",
+                "object": object_api,
+                "postcondition_verified": True,
+                "production_execution": False,
+                "record_count": len(ids),
+            }
+        ]
+        return Outcome.success(result, evidence)
+
+
 class SalesforceRollbackUpdate(SalesforceUpdateRecords):
     """Rollback only a successful update whose post-state has not drifted."""
 
@@ -240,9 +376,14 @@ class SalesforceRollbackUpdate(SalesforceUpdateRecords):
             if (
                 updated is None
                 or updated.state is not WorkState.SUCCEEDED
-                or updated.action != UPDATE_RECORDS_ACTION
+                or updated.action not in {UPDATE_RECORDS_ACTION, RECONCILE_UPDATE_ACTION}
             ):
                 raise ValueError("update receipt is missing or unsuccessful")
+            if (
+                updated.action == RECONCILE_UPDATE_ACTION
+                and updated.result.get("disposition") != "applied"
+            ):
+                raise ValueError("reconciled update was not applied and cannot be rolled back")
             object_api = str(updated.result.get("object", ""))
             ids = updated.result.get("record_ids")
             fields = updated.result.get("fields")

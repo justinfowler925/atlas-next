@@ -114,6 +114,11 @@ before-state, applies one REST composite `allOrNone` PATCH, then queries and pro
 the post-state. `salesforce.rollback_update` restores that before-state only when
 the current records still hash to the original verified after-state, preventing a
 rollback from overwriting newer work. Neither action can target production.
+If Salesforce accepts the PATCH but the postcheck is unavailable or mismatched,
+the update becomes blocked with hashed before/intended recovery evidence instead of
+losing its mutation state. `salesforce.reconcile_update` then performs a read-only
+check and proves applied, proves not applied, or remains blocked on concurrent drift;
+an applied reconciliation can use the same guarded rollback path.
 
 `salesforce.create_lwc_source` creates one complete record-page LWC bundle at a
 path derived from its validated API name. The exact five-file contract includes

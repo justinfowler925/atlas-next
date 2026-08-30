@@ -56,8 +56,10 @@ from .salesforce_flow import (
     VerifyFlowActivation,
 )
 from .salesforce_data import (
+    RECONCILE_UPDATE_ACTION,
     ROLLBACK_UPDATE_ACTION,
     UPDATE_RECORDS_ACTION,
+    SalesforceReconcileUpdate,
     SalesforceRollbackUpdate,
     SalesforceUpdateRecords,
 )
@@ -196,6 +198,15 @@ def _parser() -> argparse.ArgumentParser:
     rollback.add_argument("--reason", required=True)
     rollback.add_argument("--partial-alias", default="dod-check")
     rollback.add_argument("--artifact-root", type=Path, default=Path(".atlas-next/artifacts"))
+    reconcile = sub.add_parser(
+        "salesforce-reconcile-update",
+        help="reconcile a PATCH-success/postcheck-unknown Partial update",
+    )
+    reconcile.add_argument("update_work_id")
+    reconcile.add_argument("--partial-alias", default="dod-check")
+    reconcile.add_argument(
+        "--artifact-root", type=Path, default=Path(".atlas-next/artifacts")
+    )
     create_lwc = sub.add_parser(
         "salesforce-create-lwc-source",
         help="create one complete record-page LWC bundle with a behavioral Jest test",
@@ -477,6 +488,17 @@ def main(argv: list[str] | None = None) -> int:
                 ROLLBACK_UPDATE_ACTION,
                 {"update_work_id": args.update_work_id, "reason": args.reason},
                 SalesforceRollbackUpdate(
+                    store,
+                    partial_alias=args.partial_alias,
+                    artifact_root=args.artifact_root,
+                ),
+            )
+        if args.command == "salesforce-reconcile-update":
+            return _execute(
+                store,
+                RECONCILE_UPDATE_ACTION,
+                {"update_work_id": args.update_work_id},
+                SalesforceReconcileUpdate(
                     store,
                     partial_alias=args.partial_alias,
                     artifact_root=args.artifact_root,
