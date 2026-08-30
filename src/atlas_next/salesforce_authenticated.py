@@ -11,7 +11,7 @@ from typing import Any
 
 from .engine import Outcome
 from .models import WorkItem
-from .salesforce import CommandRunner, _failure_detail, run_command
+from .salesforce import CommandRunner, _failure_detail, require_partial_target, run_command
 
 
 AUTHENTICATED_GET_ACTION = "salesforce.authenticated_get"
@@ -78,6 +78,9 @@ class SalesforceAuthenticatedGet:
             request = AuthenticatedGetRequest.from_payload(item.payload)
             if not self.partial_alias:
                 raise ValueError("Partial alias is required")
+            partial = require_partial_target(
+                self.runner, self.partial_alias, self.timeout_seconds
+            )
             endpoint = f"callout:{request.named_credential}{request.path}"
             merge_field = (
                 "{!$Credential."
@@ -151,6 +154,7 @@ class SalesforceAuthenticatedGet:
             "named_credential": request.named_credential,
             "path": request.path,
             "target_alias": self.partial_alias,
+            "target_org_id": partial["org_id"],
         }
         evidence = [
             {

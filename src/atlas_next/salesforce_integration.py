@@ -19,7 +19,7 @@ from .delivery import (
 from .engine import Outcome
 from .integration_source import CREATE_INTEGRATION_SOURCE_ACTION
 from .models import WorkItem, WorkState
-from .salesforce import CommandRunner, _failure_detail, run_command
+from .salesforce import CommandRunner, _failure_detail, require_partial_target, run_command
 from .store import Store
 
 
@@ -91,6 +91,9 @@ class VerifyIntegrationExecution:
                 or not self.partial_alias
             ):
                 raise ValueError("integration source or Partial alias is invalid")
+            partial = require_partial_target(
+                self.runner, self.partial_alias, self.timeout_seconds
+            )
             escaped = expected.replace("\\", "\\\\").replace("'", "\\'")
             script = (
                 f"String result = {name}.fetchMarker();\n"
@@ -127,6 +130,7 @@ class VerifyIntegrationExecution:
         result = {
             "environment": "partial",
             "target_alias": self.partial_alias,
+            "target_org_id": partial["org_id"],
             "name": name,
             "host": source.result.get("base_url"),
             "path": source.result.get("path"),

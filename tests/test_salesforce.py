@@ -16,6 +16,7 @@ from atlas_next.salesforce import (
     SalesforceCount,
     SalesforceDescribe,
     SalesforcePicklistCounts,
+    require_partial_target,
 )
 
 
@@ -40,6 +41,38 @@ def _count(total=4753, *, done=True) -> str:
     return json.dumps(
         {"status": 0, "result": {"records": [], "totalSize": total, "done": done}}
     )
+
+
+def test_partial_target_guard_rejects_production_behind_a_partial_alias():
+    response = json.dumps(
+        {
+            "result": {
+                "id": "00D000000000001AAA",
+                "username": "ci.deploy@clearspeed.com",
+                "instanceUrl": "https://clearspeed.my.salesforce.com/",
+            }
+        }
+    )
+    with pytest.raises(ValueError, match="not the pinned Partial org"):
+        require_partial_target(
+            lambda *_args: CommandResult(0, response, ""), "dod-check", 30
+        )
+
+
+def test_partial_target_guard_accepts_exact_ci_deploy_partial_identity():
+    response = json.dumps(
+        {
+            "result": {
+                "id": "00DU700000CBa9JMAT",
+                "username": "ci.deploy@clearspeed.com.partial",
+                "instanceUrl": "https://clearspeed--partial.sandbox.my.salesforce.com/",
+            }
+        }
+    )
+    result = require_partial_target(
+        lambda *_args: CommandResult(0, response, ""), "dod-check", 30
+    )
+    assert result["org_id"] == "00DU700000CBa9JMAT"
 
 
 def _picklist_describe(*, field_type="picklist", groupable=True) -> str:

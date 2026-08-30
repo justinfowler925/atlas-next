@@ -13,7 +13,7 @@ from typing import Any
 
 from .engine import Outcome
 from .models import WorkItem, WorkState
-from .salesforce import CommandRunner, _failure_detail, run_command
+from .salesforce import CommandRunner, _failure_detail, require_partial_target, run_command
 from .salesforce_query import _parse_describe
 from .store import Store
 
@@ -148,6 +148,9 @@ class SalesforceUpdateRecords:
             request = UpdateRecordsRequest.from_payload(item.payload)
             if not self.partial_alias:
                 raise ValueError("Partial target alias is required")
+            partial = require_partial_target(
+                self.runner, self.partial_alias, self.timeout_seconds
+            )
             described = self._run(
                 [
                     "sf", "sobject", "describe", "--sobject", request.object_api,
@@ -196,6 +199,7 @@ class SalesforceUpdateRecords:
         result = {
             "environment": "partial",
             "target_alias": self.partial_alias,
+            "target_org_id": partial["org_id"],
             "object": request.object_api,
             "record_ids": ids,
             "fields": field_names,
@@ -272,6 +276,9 @@ class SalesforceReconcileUpdate(SalesforceUpdateRecords):
     def __call__(self, item: WorkItem) -> Outcome:
         try:
             request = ReconcileUpdateRequest.from_payload(item.payload)
+            partial = require_partial_target(
+                self.runner, self.partial_alias, self.timeout_seconds
+            )
             updated = self.store.get(request.update_work_id)
             if (
                 updated is None
@@ -346,6 +353,7 @@ class SalesforceReconcileUpdate(SalesforceUpdateRecords):
             "record_count": len(ids),
             "record_ids": ids,
             "target_alias": self.partial_alias,
+            "target_org_id": partial["org_id"],
             "update_work_id": request.update_work_id,
         }
         evidence = [
@@ -372,6 +380,9 @@ class SalesforceRollbackUpdate(SalesforceUpdateRecords):
     def __call__(self, item: WorkItem) -> Outcome:
         try:
             request = RollbackUpdateRequest.from_payload(item.payload)
+            partial = require_partial_target(
+                self.runner, self.partial_alias, self.timeout_seconds
+            )
             updated = self.store.get(request.update_work_id)
             if (
                 updated is None
@@ -415,6 +426,7 @@ class SalesforceRollbackUpdate(SalesforceUpdateRecords):
         result = {
             "environment": "partial",
             "target_alias": self.partial_alias,
+            "target_org_id": partial["org_id"],
             "object": object_api,
             "record_ids": ids,
             "record_count": len(ids),

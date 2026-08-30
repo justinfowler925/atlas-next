@@ -18,6 +18,18 @@ from atlas_next.salesforce_integration import (
 )
 
 
+def _partial():
+    return json.dumps(
+        {
+            "result": {
+                "id": "00DU700000CBa9JMAT",
+                "username": "ci.deploy@clearspeed.com.partial",
+                "instanceUrl": "https://clearspeed--partial.sandbox.my.salesforce.com/",
+            }
+        }
+    )
+
+
 def _succeed(store, action, result):
     item = store.enqueue(action, {})
     assert store.claim(item.id, "proof") is not None
@@ -60,6 +72,8 @@ def test_integration_execution_proves_lineage_and_live_runtime(tmp_path):
 
         def runner(argv, _timeout):
             commands.append(list(argv))
+            if argv[:3] == ["sf", "org", "display"]:
+                return CommandResult(0, _partial(), "")
             return CommandResult(
                 0,
                 json.dumps(
@@ -92,8 +106,9 @@ def test_integration_execution_proves_lineage_and_live_runtime(tmp_path):
             execution_enabled=True,
         ).run_once(work_id=item.id).item
 
-    assert commands[0][:4] == ["sf", "apex", "run", "--file"]
-    assert commands[0][-3:] == ["--target-org", "dod-check", "--json"]
+    assert commands[0][:3] == ["sf", "org", "display"]
+    assert commands[1][:4] == ["sf", "apex", "run", "--file"]
+    assert commands[1][-3:] == ["--target-org", "dod-check", "--json"]
     assert completed is not None and completed.state is WorkState.SUCCEEDED
     assert completed.evidence[0]["external_callout"] is True
     assert completed.evidence[0]["production_execution"] is False

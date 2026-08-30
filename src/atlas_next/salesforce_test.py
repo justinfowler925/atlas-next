@@ -8,7 +8,13 @@ from typing import Any
 
 from .engine import Outcome
 from .models import WorkItem
-from .salesforce import CommandRunner, _failure_detail, _json_error, run_command
+from .salesforce import (
+    CommandRunner,
+    _failure_detail,
+    _json_error,
+    require_partial_target,
+    run_command,
+)
 
 
 APEX_TEST_ACTION = "salesforce.apex_test"
@@ -60,6 +66,9 @@ class SalesforceApexTest:
             request = ApexTestRequest.from_payload(item.payload)
             if not self.partial_alias:
                 raise ValueError("partial target alias is required")
+            partial = require_partial_target(
+                self.runner, self.partial_alias, self.timeout_seconds
+            )
             listed = self.runner(
                 [
                     "sf",
@@ -113,6 +122,7 @@ class SalesforceApexTest:
         result = {
             "environment": "partial",
             "target_alias": self.partial_alias,
+            "target_org_id": partial["org_id"],
             "classes": list(request.classes),
             **summary,
         }
@@ -121,6 +131,7 @@ class SalesforceApexTest:
                 "kind": APEX_TEST_ACTION,
                 "environment": "partial",
                 "target_alias": self.partial_alias,
+                "target_org_id": partial["org_id"],
                 "class_count": len(request.classes),
                 "tests_ran": summary["tests_ran"],
                 "passing": summary["passing"],

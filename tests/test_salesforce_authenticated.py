@@ -22,11 +22,25 @@ def _payload(**overrides):
     return payload
 
 
+def _partial():
+    return json.dumps(
+        {
+            "result": {
+                "id": "00DU700000CBa9JMAT",
+                "username": "ci.deploy@clearspeed.com.partial",
+                "instanceUrl": "https://clearspeed--partial.sandbox.my.salesforce.com/",
+            }
+        }
+    )
+
+
 def test_authenticated_get_proves_status_without_recording_body(tmp_path):
     commands = []
 
     def runner(argv, _timeout):
         commands.append(list(argv))
+        if argv[:3] == ["sf", "org", "display"]:
+            return CommandResult(0, _partial(), "")
         logs = (
             "00:00|USER_DEBUG|[10]|DEBUG|ATLAS_AUTH_GET_STATUS=200\n"
             + "00:00|USER_DEBUG|[11]|DEBUG|ATLAS_AUTH_GET_BODY_SHA256="
@@ -54,7 +68,8 @@ def test_authenticated_get_proves_status_without_recording_body(tmp_path):
             execution_enabled=True,
         ).run_once(work_id=item.id).item
 
-    assert commands[0][:4] == ["sf", "apex", "run", "--file"]
+    assert commands[0][:3] == ["sf", "org", "display"]
+    assert commands[1][:4] == ["sf", "apex", "run", "--file"]
     assert completed is not None and completed.state is WorkState.SUCCEEDED
     assert completed.result["http_status"] == 200
     assert completed.result["body_bytes"] == 321

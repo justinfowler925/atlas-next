@@ -32,6 +32,11 @@ an operator decision that creates a visible event.
   least one structured evidence record.
 - Health reads effective executor configuration and handler coverage. A dormant
   executor is `paused`, not healthy.
+- Every Partial-only executor resolves its target immediately before execution and
+  requires org `00DU700000CBa9JMAT`, principal
+  `ci.deploy@clearspeed.com.partial`, and the Partial sandbox domain. Alias names are
+  not authority; an alias repointed to production fails before any test, Flow, PATCH,
+  rollback, or credential-bound callout runs.
 
 ## Migration rule
 

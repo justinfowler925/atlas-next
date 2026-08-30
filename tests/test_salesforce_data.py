@@ -46,6 +46,27 @@ def _describe():
     )
 
 
+def _partial():
+    return json.dumps(
+        {
+            "result": {
+                "id": "00DU700000CBa9JMAT",
+                "username": "ci.deploy@clearspeed.com.partial",
+                "instanceUrl": "https://clearspeed--partial.sandbox.my.salesforce.com/",
+            }
+        }
+    )
+
+
+def _guarded_query(value):
+    def runner(argv, _timeout):
+        if argv[:3] == ["sf", "org", "display"]:
+            return CommandResult(0, _partial(), "")
+        return CommandResult(0, _query(value), "")
+
+    return runner
+
+
 def _query(value):
     return json.dumps(
         {
@@ -86,6 +107,8 @@ def test_update_schema_validates_then_atomically_patches_and_requeries(tmp_path)
     def runner(argv, _timeout):
         nonlocal query_count
         commands.append(list(argv))
+        if argv[:3] == ["sf", "org", "display"]:
+            return CommandResult(0, _partial(), "")
         if argv[:3] == ["sf", "sobject", "describe"]:
             return CommandResult(0, _describe(), "")
         if argv[:3] == ["sf", "data", "query"]:
@@ -135,6 +158,8 @@ def test_rollback_requires_unchanged_after_state_then_restores_before(tmp_path):
 
     def runner(argv, _timeout):
         nonlocal query_count
+        if argv[:3] == ["sf", "org", "display"]:
+            return CommandResult(0, _partial(), "")
         if argv[:3] == ["sf", "data", "query"]:
             query_count += 1
             return CommandResult(0, _query("new" if query_count == 1 else "old"), "")
@@ -199,6 +224,8 @@ def test_update_blocks_with_recovery_evidence_after_patch_when_postquery_fails(t
 
     def runner(argv, _timeout):
         nonlocal query_count
+        if argv[:3] == ["sf", "org", "display"]:
+            return CommandResult(0, _partial(), "")
         if argv[:3] == ["sf", "sobject", "describe"]:
             return CommandResult(0, _describe(), "")
         if argv[:3] == ["sf", "data", "query"]:
@@ -272,7 +299,7 @@ def test_reconcile_update_proves_applied_or_not_applied(tmp_path, current, dispo
                     store,
                     partial_alias="dod-check",
                     artifact_root=tmp_path / "artifacts",
-                    runner=lambda argv, _timeout: CommandResult(0, _query(current), ""),
+                    runner=_guarded_query(current),
                 )
             },
             worker_id="test",
@@ -313,9 +340,7 @@ def test_reconcile_update_blocks_on_concurrent_drift(tmp_path):
                     store,
                     partial_alias="dod-check",
                     artifact_root=tmp_path / "artifacts",
-                    runner=lambda argv, _timeout: CommandResult(
-                        0, _query("concurrent"), ""
-                    ),
+                    runner=_guarded_query("concurrent"),
                 )
             },
             worker_id="test",
@@ -331,6 +356,8 @@ def test_rollback_accepts_reconciled_applied_update(tmp_path):
 
     def runner(argv, _timeout):
         nonlocal query_count
+        if argv[:3] == ["sf", "org", "display"]:
+            return CommandResult(0, _partial(), "")
         if argv[:3] == ["sf", "data", "query"]:
             query_count += 1
             return CommandResult(0, _query("new" if query_count == 1 else "old"), "")

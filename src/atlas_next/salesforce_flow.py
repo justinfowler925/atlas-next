@@ -19,7 +19,7 @@ from .delivery import (
 from .engine import Outcome
 from .flow_source import CREATE_FLOW_SOURCE_ACTION
 from .models import WorkItem, WorkState
-from .salesforce import CommandRunner, _failure_detail, run_command
+from .salesforce import CommandRunner, _failure_detail, require_partial_target, run_command
 from .store import Store
 
 
@@ -107,6 +107,9 @@ class VerifyFlowActivation:
             name = str(source.result.get("name", ""))
             if not _API_NAME_RE.fullmatch(name) or not self.partial_alias:
                 raise ValueError("Flow source or Partial alias is invalid")
+            partial = require_partial_target(
+                self.runner, self.partial_alias, self.timeout_seconds
+            )
             query = (
                 "SELECT DeveloperName, ActiveVersion.VersionNumber, "
                 "LatestVersion.VersionNumber FROM FlowDefinition "
@@ -143,6 +146,7 @@ class VerifyFlowActivation:
         result = {
             "environment": "partial",
             "target_alias": self.partial_alias,
+            "target_org_id": partial["org_id"],
             "name": name,
             "active_version": active,
             "latest_version": latest,
@@ -194,6 +198,9 @@ class RunCreatedFlow:
             name = str(activation.result.get("name", ""))
             if not _API_NAME_RE.fullmatch(name) or not self.partial_alias:
                 raise ValueError("activation receipt or Partial alias is invalid")
+            partial = require_partial_target(
+                self.runner, self.partial_alias, self.timeout_seconds
+            )
             script = _runtime_script(name, request.output_variable, request.expected_string)
             self.artifact_root.mkdir(parents=True, exist_ok=True)
             with tempfile.TemporaryDirectory(dir=self.artifact_root) as temp_dir:
@@ -225,6 +232,7 @@ class RunCreatedFlow:
         result_payload = {
             "environment": "partial",
             "target_alias": self.partial_alias,
+            "target_org_id": partial["org_id"],
             "name": name,
             "output_variable": request.output_variable,
             "output_value": request.expected_string,

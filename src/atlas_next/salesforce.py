@@ -17,6 +17,8 @@ PICKLIST_COUNTS_ACTION = "salesforce.picklist_counts"
 # Compatibility for the first admitted capability.
 ACTION = DESCRIBE_ACTION
 _ENVIRONMENTS = frozenset({"partial", "prod"})
+PARTIAL_ORG_ID = "00DU700000CBa9JMAT"
+PARTIAL_USERNAME = "ci.deploy@clearspeed.com.partial"
 _OBJECT_API_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,79}$")
 _PAYLOAD_KEYS = frozenset({"environment", "object"})
 _PICKLIST_PAYLOAD_KEYS = frozenset({"environment", "object", "field"})
@@ -94,6 +96,34 @@ class CommandResult:
 
 
 CommandRunner = Callable[[Sequence[str], float], CommandResult]
+
+
+def require_partial_target(
+    runner: CommandRunner, alias: str, timeout_seconds: float
+) -> dict[str, str]:
+    """Resolve an alias and fail unless it is the pinned Partial CI principal."""
+    completed = runner(
+        ["sf", "org", "display", "--target-org", alias, "--json"], timeout_seconds
+    )
+    if completed.returncode != 0:
+        raise ValueError(f"Partial identity check failed: {_failure_detail(completed)}")
+    try:
+        result = json.loads(completed.stdout)["result"]
+        org_id = result["id"]
+        username = result["username"]
+        instance_url = result["instanceUrl"]
+    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Partial identity check returned invalid JSON: {exc}") from exc
+    if (
+        org_id != PARTIAL_ORG_ID
+        or username != PARTIAL_USERNAME
+        or "--partial.sandbox.my.salesforce.com" not in instance_url
+    ):
+        raise ValueError(
+            "target is not the pinned Partial org and ci.deploy principal "
+            f"({org_id!r}, {username!r})"
+        )
+    return {"org_id": org_id, "username": username, "instance_url": instance_url}
 
 
 def run_command(argv: Sequence[str], timeout_seconds: float) -> CommandResult:

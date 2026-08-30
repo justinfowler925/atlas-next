@@ -33,6 +33,18 @@ def _result(**summary_overrides):
     return json.dumps({"status": 0, "result": {"summary": summary, "tests": []}})
 
 
+def _partial():
+    return json.dumps(
+        {
+            "result": {
+                "id": "00DU700000CBa9JMAT",
+                "username": "ci.deploy@clearspeed.com.partial",
+                "instanceUrl": "https://clearspeed--partial.sandbox.my.salesforce.com/",
+            }
+        }
+    )
+
+
 def test_apex_test_contract_has_no_org_test_level_or_command_escape():
     for key in ("environment", "target_org", "test_level", "command", "tests"):
         with pytest.raises(ValueError, match=f"unexpected keys: {key}"):
@@ -44,7 +56,11 @@ def test_apex_test_contract_has_no_org_test_level_or_command_escape():
 def test_apex_test_live_validates_classes_then_runs_named_tests_in_partial(tmp_path):
     calls = []
     responses = iter(
-        [CommandResult(0, _classes(("OneTest", "TwoTest")), ""), CommandResult(0, _result(), "")]
+        [
+            CommandResult(0, _partial(), ""),
+            CommandResult(0, _classes(("OneTest", "TwoTest")), ""),
+            CommandResult(0, _result(), ""),
+        ]
     )
 
     def runner(argv, timeout):
@@ -64,11 +80,12 @@ def test_apex_test_live_validates_classes_then_runs_named_tests_in_partial(tmp_p
             execution_enabled=True,
         ).run_once(work_id=item.id).item
 
-    assert calls[0][0] == [
+    assert calls[0][0][:3] == ["sf", "org", "display"]
+    assert calls[1][0] == [
         "sf", "org", "list", "metadata", "--metadata-type", "ApexClass",
         "--target-org", "dod-check", "--json",
     ]
-    assert calls[1][0] == [
+    assert calls[2][0] == [
         "sf", "apex", "run", "test",
         "--class-names", "OneTest", "--class-names", "TwoTest",
         "--target-org", "dod-check", "--wait", "10",
@@ -82,9 +99,11 @@ def test_apex_test_live_validates_classes_then_runs_named_tests_in_partial(tmp_p
 def test_missing_live_class_stops_before_test_execution(tmp_path):
     calls = 0
 
-    def runner(_argv, _timeout):
+    def runner(argv, _timeout):
         nonlocal calls
         calls += 1
+        if argv[:3] == ["sf", "org", "display"]:
+            return CommandResult(0, _partial(), "")
         return CommandResult(0, _classes(("OtherTest",)), "")
 
     with Store(tmp_path / "state.sqlite3") as store:
@@ -95,7 +114,7 @@ def test_missing_live_class_stops_before_test_execution(tmp_path):
             worker_id="test",
             execution_enabled=True,
         ).run_once(work_id=item.id).item
-    assert calls == 1
+    assert calls == 2
     assert completed is not None and completed.state is WorkState.FAILED
     assert "absent from live Partial" in (completed.error or "")
 
@@ -111,7 +130,13 @@ def test_missing_live_class_stops_before_test_execution(tmp_path):
     ],
 )
 def test_malformed_or_failed_summary_cannot_mint_success(tmp_path, overrides, reason):
-    responses = iter([CommandResult(0, _classes(), ""), CommandResult(0, _result(**overrides), "")])
+    responses = iter(
+        [
+            CommandResult(0, _partial(), ""),
+            CommandResult(0, _classes(), ""),
+            CommandResult(0, _result(**overrides), ""),
+        ]
+    )
     with Store(tmp_path / "state.sqlite3") as store:
         item = store.enqueue(APEX_TEST_ACTION, {"classes": ["ServiceTest"]})
         completed = Engine(

@@ -20,6 +20,18 @@ from atlas_next.salesforce_flow import (
 )
 
 
+def _partial():
+    return json.dumps(
+        {
+            "result": {
+                "id": "00DU700000CBa9JMAT",
+                "username": "ci.deploy@clearspeed.com.partial",
+                "instanceUrl": "https://clearspeed--partial.sandbox.my.salesforce.com/",
+            }
+        }
+    )
+
+
 def _succeed(store, action, result):
     item = store.enqueue(action, {})
     assert store.claim(item.id, "proof") is not None
@@ -52,6 +64,8 @@ def test_flow_activation_proves_lineage_and_active_latest_parity(tmp_path):
 
         def runner(argv, _timeout):
             commands.append(list(argv))
+            if argv[:3] == ["sf", "org", "display"]:
+                return CommandResult(0, _partial(), "")
             return CommandResult(
                 0,
                 json.dumps(
@@ -86,7 +100,8 @@ def test_flow_activation_proves_lineage_and_active_latest_parity(tmp_path):
             execution_enabled=True,
         ).run_once(work_id=item.id).item
 
-    assert commands[0][:6] == [
+    assert commands[0][:3] == ["sf", "org", "display"]
+    assert commands[1][:6] == [
         "sf", "data", "query", "--target-org", "dod-check", "--use-tooling-api"
     ]
     assert completed is not None and completed.state is WorkState.SUCCEEDED
@@ -139,6 +154,8 @@ def test_run_created_flow_generates_fixed_partial_runtime_assertion(tmp_path):
 
         def runner(argv, _timeout):
             commands.append(list(argv))
+            if argv[:3] == ["sf", "org", "display"]:
+                return CommandResult(0, _partial(), "")
             script = open(argv[argv.index("--file") + 1], encoding="utf-8").read()
             assert "Flow.Interview.createInterview('Atlas_Acceptance_Autolaunched'" in script
             assert "getVariableValue('result')" in script
@@ -179,7 +196,8 @@ def test_run_created_flow_generates_fixed_partial_runtime_assertion(tmp_path):
             execution_enabled=True,
         ).run_once(work_id=item.id).item
 
-    assert commands[0][0:3] == ["sf", "apex", "run"]
+    assert commands[0][0:3] == ["sf", "org", "display"]
+    assert commands[1][0:3] == ["sf", "apex", "run"]
     assert completed is not None and completed.state is WorkState.SUCCEEDED
     assert completed.result["output_value"] == "atlas-flow-ok"
     assert completed.evidence[0]["production_execution"] is False
