@@ -13,6 +13,8 @@ from .engine import Outcome
 from .models import WorkItem, WorkState
 from .salesforce import CommandResult, _failure_detail
 from .salesforce_metadata import SOURCE_RETRIEVE_ACTION
+from .flow_source import CREATE_FLOW_SOURCE_ACTION
+from .lwc_source import CREATE_LWC_SOURCE_ACTION
 from .store import Store
 
 
@@ -111,8 +113,12 @@ class AuthorSource:
             retrieved = self.store.get(request.retrieve_work_id)
             if retrieved is None or retrieved.state is not WorkState.SUCCEEDED:
                 raise ValueError("retrieve work item is missing or unsuccessful")
-            if retrieved.action != SOURCE_RETRIEVE_ACTION:
-                raise ValueError("referenced work item is not a source retrieve receipt")
+            if retrieved.action not in {
+                SOURCE_RETRIEVE_ACTION,
+                CREATE_FLOW_SOURCE_ACTION,
+                CREATE_LWC_SOURCE_ACTION,
+            }:
+                raise ValueError("referenced work item is not a supported source receipt")
             git_root = Path(str(retrieved.result.get("git_root", ""))).resolve()
             branch = str(retrieved.result.get("branch", ""))
             metadata_type = str(retrieved.result.get("type", ""))

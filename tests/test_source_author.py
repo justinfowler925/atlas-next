@@ -8,6 +8,7 @@ from atlas_next import Engine, Store, WorkState
 from atlas_next.salesforce import CommandResult
 from atlas_next.salesforce_metadata import SOURCE_RETRIEVE_ACTION
 from atlas_next.source_author import AUTHOR_SOURCE_ACTION, AuthorSource, AuthorSourceRequest
+from atlas_next.lwc_source import CREATE_LWC_SOURCE_ACTION
 
 
 def _sha(path):
@@ -28,7 +29,8 @@ def test_author_contract_has_no_root_branch_command_or_deploy_escape():
         AuthorSourceRequest.from_payload({**payload, "path": "../Service.cls"})
 
 
-def test_author_rehashes_receipt_and_replaces_exact_source_file(tmp_path):
+@pytest.mark.parametrize("source_action", [SOURCE_RETRIEVE_ACTION, CREATE_LWC_SOURCE_ACTION])
+def test_author_rehashes_receipt_and_replaces_exact_source_file(tmp_path, source_action):
     git_root = tmp_path / "worktree"
     path = "salesforce/force-app/main/default/classes/Service.cls"
     source = git_root / path
@@ -38,7 +40,7 @@ def test_author_rehashes_receipt_and_replaces_exact_source_file(tmp_path):
     replacement = "public class Service { public static Integer value() { return 2; } }\n"
 
     with Store(tmp_path / "state.sqlite3") as store:
-        retrieved = store.enqueue(SOURCE_RETRIEVE_ACTION, {})
+        retrieved = store.enqueue(source_action, {})
         assert store.claim(retrieved.id, "retriever") is not None
         store.succeed(
             retrieved.id,
@@ -50,7 +52,7 @@ def test_author_rehashes_receipt_and_replaces_exact_source_file(tmp_path):
                 "name": "Service",
                 "files": [{"path": path, "sha256": baseline}],
             },
-            evidence=[{"kind": SOURCE_RETRIEVE_ACTION}],
+            evidence=[{"kind": source_action}],
         )
 
         def runner(argv, _cwd, _timeout):
