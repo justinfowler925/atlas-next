@@ -54,3 +54,8 @@ CLI JSON contains a non-zero, duplicate-free field population.
 exactly `SELECT COUNT() FROM <validated_object>` and accepts only a completed,
 non-negative integer result. A zero count is valid evidence; a missing, boolean,
 negative, or incomplete result fails the ledger item.
+
+`salesforce.picklist_counts` adds one field API name, live-describes it, and
+continues only when its type is exactly `picklist` and `groupable=true`. It then
+generates one `GROUP BY` query capped at 50 groups. No caller-supplied filter,
+SOQL, limit, or arbitrary text field can reach Salesforce.

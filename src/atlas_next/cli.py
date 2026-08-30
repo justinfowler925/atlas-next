@@ -6,7 +6,14 @@ from pathlib import Path
 
 from .health import snapshot
 from .engine import Engine
-from .salesforce import COUNT_ACTION, DESCRIBE_ACTION, SalesforceCount, SalesforceDescribe
+from .salesforce import (
+    COUNT_ACTION,
+    DESCRIBE_ACTION,
+    PICKLIST_COUNTS_ACTION,
+    SalesforceCount,
+    SalesforceDescribe,
+    SalesforcePicklistCounts,
+)
 from .store import Store
 
 
@@ -34,6 +41,15 @@ def _parser() -> argparse.ArgumentParser:
     count.add_argument("--environment", choices=("partial", "prod"), default="partial")
     count.add_argument("--partial-alias", default="dod-check")
     count.add_argument("--prod-alias", default="prod")
+    picklist = sub.add_parser(
+        "salesforce-picklist-counts",
+        help="return a capped distribution for one live-validated picklist",
+    )
+    picklist.add_argument("object")
+    picklist.add_argument("field")
+    picklist.add_argument("--environment", choices=("partial", "prod"), default="partial")
+    picklist.add_argument("--partial-alias", default="dod-check")
+    picklist.add_argument("--prod-alias", default="prod")
     return parser
 
 
@@ -93,6 +109,41 @@ def main(argv: list[str] | None = None) -> int:
             engine = Engine(
                 store,
                 {COUNT_ACTION: capability},
+                worker_id="operator:cli",
+                execution_enabled=True,
+            )
+            run = engine.run_once(work_id=item.id)
+            completed = run.item or store.get(item.id)
+            print(
+                json.dumps(
+                    {
+                        "id": completed.id,
+                        "state": completed.state,
+                        "result": completed.result,
+                        "evidence": completed.evidence,
+                        "error": completed.error,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 0 if completed.state == "succeeded" else 1
+        if args.command == "salesforce-picklist-counts":
+            item = store.enqueue(
+                PICKLIST_COUNTS_ACTION,
+                {
+                    "environment": args.environment,
+                    "object": args.object,
+                    "field": args.field,
+                },
+                max_attempts=1,
+            )
+            capability = SalesforcePicklistCounts(
+                {"partial": args.partial_alias, "prod": args.prod_alias}
+            )
+            engine = Engine(
+                store,
+                {PICKLIST_COUNTS_ACTION: capability},
                 worker_id="operator:cli",
                 execution_enabled=True,
             )
