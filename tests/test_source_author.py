@@ -137,6 +137,75 @@ def test_author_refuses_stale_receipt_before_writing(tmp_path):
     assert "changed before authoring" in (completed.error or "")
 
 
+def test_author_restores_original_file_when_postwrite_git_check_fails(tmp_path):
+    git_root = tmp_path / "worktree"
+    path = "salesforce/force-app/main/default/classes/Service.cls"
+    source = git_root / path
+    source.parent.mkdir(parents=True)
+    original = "public class Service {}\n"
+    source.write_text(original)
+    baseline = _sha(source)
+
+    with Store(tmp_path / "state.sqlite3") as store:
+        retrieved = store.enqueue(SOURCE_RETRIEVE_ACTION, {})
+        assert store.claim(retrieved.id, "retriever") is not None
+        store.succeed(
+            retrieved.id,
+            "retriever",
+            result={
+                "git_root": str(git_root),
+                "branch": "feature",
+                "type": "ApexClass",
+                "name": "Service",
+                "files": [{"path": path, "sha256": baseline}],
+            },
+            evidence=[{"kind": SOURCE_RETRIEVE_ACTION}],
+        )
+        status_calls = 0
+
+        def runner(argv, _cwd, _timeout):
+            nonlocal status_calls
+            if argv == ["git", "branch", "--show-current"]:
+                return CommandResult(0, "feature\n", "")
+            if argv == ["git", "status", "--porcelain=v1", "--untracked-files=all"]:
+                status_calls += 1
+                if status_calls == 1:
+                    return CommandResult(0, "", "")
+                return CommandResult(0, " M unrelated.txt\n", "")
+            raise AssertionError(argv)
+
+        item = store.enqueue(
+            AUTHOR_SOURCE_ACTION,
+            {
+                "retrieve_work_id": retrieved.id,
+                "path": path,
+                "expected_sha256": baseline,
+                "content": "public class Service { public static void changed() {} }\n",
+            },
+        )
+        completed = Engine(
+            store,
+            {AUTHOR_SOURCE_ACTION: AuthorSource(store, runner=runner)},
+            worker_id="test",
+            execution_enabled=True,
+        ).run_once(work_id=item.id).item
+
+    assert completed is not None and completed.state is WorkState.FAILED
+    assert source.read_text() == original
+
+
+def test_author_refuses_metadata_xml_with_wrong_root():
+    from atlas_next.source_author import _validate_content
+
+    with pytest.raises(ValueError, match="does not match type"):
+        _validate_content(
+            "salesforce/force-app/main/default/flows/Proof.flow-meta.xml",
+            '<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata"/>',
+            "Flow",
+            "Proof",
+        )
+
+
 def test_author_rejects_malformed_or_entity_xml():
     base = {
         "retrieve_work_id": "one",

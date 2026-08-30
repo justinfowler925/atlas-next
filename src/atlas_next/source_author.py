@@ -157,26 +157,33 @@ class AuthorSource:
             if not dirty_before <= set(receipts):
                 raise ValueError("worktree contains dirt outside the retrieved component")
             _validate_content(request.path, request.content, metadata_type, component_name)
-            absolute.write_text(request.content, encoding="utf-8")
-            authored_sha = _sha256(absolute)
-            if authored_sha == request.expected_sha256:
-                raise ValueError("authored content is identical to the retrieved source")
-            dirty_after = _porcelain_paths(
-                self._git(
-                    git_root,
-                    ["git", "status", "--porcelain=v1", "--untracked-files=all"],
-                ).stdout
-            )
-            if request.path not in dirty_after or not dirty_after <= set(receipts):
-                raise ValueError("authoring did not produce only the retrieved component dirt")
-            files = [
-                {
-                    "path": path,
-                    "sha256": _sha256(git_root / path),
-                    "bytes": (git_root / path).stat().st_size,
-                }
-                for path in sorted(dirty_after)
-            ]
+            original_content = absolute.read_text(encoding="utf-8")
+            try:
+                absolute.write_text(request.content, encoding="utf-8")
+                authored_sha = _sha256(absolute)
+                if authored_sha == request.expected_sha256:
+                    raise ValueError("authored content is identical to the retrieved source")
+                dirty_after = _porcelain_paths(
+                    self._git(
+                        git_root,
+                        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+                    ).stdout
+                )
+                if request.path not in dirty_after or not dirty_after <= set(receipts):
+                    raise ValueError(
+                        "authoring did not produce only the retrieved component dirt"
+                    )
+                files = [
+                    {
+                        "path": path,
+                        "sha256": _sha256(git_root / path),
+                        "bytes": (git_root / path).stat().st_size,
+                    }
+                    for path in sorted(dirty_after)
+                ]
+            except Exception:
+                absolute.write_text(original_content, encoding="utf-8")
+                raise
         except (ValueError, OSError, subprocess.SubprocessError, UnicodeError, ET.ParseError) as exc:
             return Outcome.failed(f"Salesforce source authoring refused: {exc}")
 
@@ -241,7 +248,12 @@ def _validate_content(path: str, content: str, metadata_type: str, component_nam
     if path.endswith(".xml"):
         if "<!DOCTYPE" in content.upper() or "<!ENTITY" in content.upper():
             raise ValueError("XML document types and entities are not allowed")
-        ET.fromstring(content)
+        root = ET.fromstring(content)
+        root_name = root.tag.rsplit("}", 1)[-1]
+        if metadata_type and root_name != metadata_type:
+            raise ValueError(
+                f"metadata XML root {root_name!r} does not match type {metadata_type!r}"
+            )
     if metadata_type == "ApexClass" and path.endswith(".cls"):
         if re.search(rf"\bclass\s+{re.escape(component_name)}\b", content) is None:
             raise ValueError("Apex class body does not declare the retrieved component")
