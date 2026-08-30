@@ -49,3 +49,8 @@ and its object is one validated API name. The implementation constructs one
 argument-vector subprocess call to `sf sobject describe`; it has no shell, SOQL,
 free-form command, or mutation path. The ledger accepts success only after the
 CLI JSON contains a non-zero, duplicate-free field population.
+
+`salesforce.count` uses the same two-field request and target map. It constructs
+exactly `SELECT COUNT() FROM <validated_object>` and accepts only a completed,
+non-negative integer result. A zero count is valid evidence; a missing, boolean,
+negative, or incomplete result fails the ledger item.

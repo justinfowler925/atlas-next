@@ -27,9 +27,11 @@ This repository contains the replacement kernel only:
 - truthful health snapshots;
 - tests for the failure classes that made legacy Atlas untrustworthy.
 
-The first admitted capability is `salesforce.describe`: a hardcoded read-only
-Salesforce CLI call for one object in Partial or production. It accepts no SOQL,
-command string, mutation verb, or arbitrary target. Linear, GitHub, Slack,
+The admitted capabilities are `salesforce.describe` and `salesforce.count`:
+hardcoded read-only Salesforce CLI calls for one object in Partial or production.
+Count generates exactly `SELECT COUNT() FROM <validated_object>`; callers cannot
+supply SOQL, filters, fields, command strings, mutation verbs, or arbitrary targets.
+Linear, GitHub, Slack,
 deployment, scheduling, and LLM adapters remain absent. The old Atlas is not a
 runtime dependency.
 
@@ -51,5 +53,7 @@ Run the single read-only Salesforce capability explicitly:
 
 ```bash
 atlas-next --db /tmp/atlas-next.sqlite salesforce-inspect Account \
+  --environment partial --partial-alias dod-check
+atlas-next --db /tmp/atlas-next.sqlite salesforce-count Account \
   --environment partial --partial-alias dod-check
 ```

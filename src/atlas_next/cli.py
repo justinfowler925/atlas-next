@@ -6,8 +6,7 @@ from pathlib import Path
 
 from .health import snapshot
 from .engine import Engine
-from .salesforce import ACTION as SALESFORCE_DESCRIBE_ACTION
-from .salesforce import SalesforceDescribe
+from .salesforce import COUNT_ACTION, DESCRIBE_ACTION, SalesforceCount, SalesforceDescribe
 from .store import Store
 
 
@@ -28,6 +27,13 @@ def _parser() -> argparse.ArgumentParser:
     inspect.add_argument("--environment", choices=("partial", "prod"), default="partial")
     inspect.add_argument("--partial-alias", default="dod-check")
     inspect.add_argument("--prod-alias", default="prod")
+    count = sub.add_parser(
+        "salesforce-count", help="count one Salesforce object with generated read-only SOQL"
+    )
+    count.add_argument("object")
+    count.add_argument("--environment", choices=("partial", "prod"), default="partial")
+    count.add_argument("--partial-alias", default="dod-check")
+    count.add_argument("--prod-alias", default="prod")
     return parser
 
 
@@ -46,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "salesforce-inspect":
             item = store.enqueue(
-                SALESFORCE_DESCRIBE_ACTION,
+                DESCRIBE_ACTION,
                 {"environment": args.environment, "object": args.object},
                 max_attempts=1,
             )
@@ -55,7 +61,38 @@ def main(argv: list[str] | None = None) -> int:
             )
             engine = Engine(
                 store,
-                {SALESFORCE_DESCRIBE_ACTION: capability},
+                {DESCRIBE_ACTION: capability},
+                worker_id="operator:cli",
+                execution_enabled=True,
+            )
+            run = engine.run_once(work_id=item.id)
+            completed = run.item or store.get(item.id)
+            print(
+                json.dumps(
+                    {
+                        "id": completed.id,
+                        "state": completed.state,
+                        "result": completed.result,
+                        "evidence": completed.evidence,
+                        "error": completed.error,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 0 if completed.state == "succeeded" else 1
+        if args.command == "salesforce-count":
+            item = store.enqueue(
+                COUNT_ACTION,
+                {"environment": args.environment, "object": args.object},
+                max_attempts=1,
+            )
+            capability = SalesforceCount(
+                {"partial": args.partial_alias, "prod": args.prod_alias}
+            )
+            engine = Engine(
+                store,
+                {COUNT_ACTION: capability},
                 worker_id="operator:cli",
                 execution_enabled=True,
             )

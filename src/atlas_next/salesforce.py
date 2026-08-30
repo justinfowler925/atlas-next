@@ -11,7 +11,10 @@ from .engine import Outcome
 from .models import WorkItem
 
 
-ACTION = "salesforce.describe"
+DESCRIBE_ACTION = "salesforce.describe"
+COUNT_ACTION = "salesforce.count"
+# Compatibility for the first admitted capability.
+ACTION = DESCRIBE_ACTION
 _ENVIRONMENTS = frozenset({"partial", "prod"})
 _OBJECT_API_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,79}$")
 _PAYLOAD_KEYS = frozenset({"environment", "object"})
@@ -40,6 +43,17 @@ class DescribeRequest:
         if not _OBJECT_API_RE.fullmatch(object_api):
             raise ValueError("object must be one Salesforce object API name")
         return cls(environment=environment, object_api=object_api)
+
+
+@dataclass(frozen=True)
+class CountRequest:
+    environment: str
+    object_api: str
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> CountRequest:
+        described = DescribeRequest.from_payload(payload)
+        return cls(environment=described.environment, object_api=described.object_api)
 
 
 @dataclass(frozen=True)
@@ -146,6 +160,80 @@ class SalesforceDescribe:
                 "key_prefix": describe.get("keyPrefix"),
                 "transport": "salesforce-cli-json",
                 "read_only_command": True,
+            }
+        ]
+        return Outcome.success(result, evidence)
+
+
+class SalesforceCount:
+    """Count every record in one validated object with generated SOQL only."""
+
+    def __init__(
+        self,
+        targets: Mapping[str, str],
+        *,
+        runner: CommandRunner = run_command,
+        timeout_seconds: float = 60,
+    ) -> None:
+        self.targets = {key: value.strip() for key, value in targets.items()}
+        self.runner = runner
+        self.timeout_seconds = timeout_seconds
+
+    def __call__(self, item: WorkItem) -> Outcome:
+        try:
+            request = CountRequest.from_payload(item.payload)
+            target = self.targets.get(request.environment, "")
+            if not target:
+                raise ValueError(f"no target alias configured for {request.environment}")
+            soql = f"SELECT COUNT() FROM {request.object_api}"
+            argv = [
+                "sf",
+                "data",
+                "query",
+                "--query",
+                soql,
+                "--target-org",
+                target,
+                "--json",
+            ]
+            completed = self.runner(argv, self.timeout_seconds)
+        except (ValueError, OSError, subprocess.SubprocessError) as exc:
+            return Outcome.failed(f"salesforce count refused: {exc}")
+
+        if completed.returncode != 0:
+            detail = _failure_detail(completed)
+            return Outcome.failed(
+                f"salesforce count failed for {request.object_api}@{target}: {detail}"
+            )
+        try:
+            envelope = json.loads(completed.stdout)
+            if int(envelope.get("status", 0)) != 0:
+                raise ValueError(_json_error(envelope) or "Salesforce CLI returned non-zero status")
+            query_result = envelope["result"]
+            count = query_result["totalSize"]
+            if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+                raise ValueError("count result must be a non-negative integer")
+            if query_result.get("done") is not True:
+                raise ValueError("count query did not finish")
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            return Outcome.failed(f"salesforce count response rejected: {exc}")
+
+        result = {
+            "environment": request.environment,
+            "target_alias": target,
+            "object": request.object_api,
+            "count": count,
+        }
+        evidence = [
+            {
+                "kind": "salesforce.data.count",
+                "environment": request.environment,
+                "target_alias": target,
+                "object": request.object_api,
+                "count": count,
+                "transport": "salesforce-cli-json",
+                "read_only_command": True,
+                "query_shape": "SELECT COUNT() FROM <validated_object>",
             }
         ]
         return Outcome.success(result, evidence)
