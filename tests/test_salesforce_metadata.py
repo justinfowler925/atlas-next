@@ -34,6 +34,9 @@ def _inventory(metadata_type, names):
 
 
 def test_metadata_diff_contract_allows_only_a_fixed_type_vocabulary():
+    assert MetadataDiffRequest.from_payload({"type": "ExternalCredential"}).metadata_type == (
+        "ExternalCredential"
+    )
     with pytest.raises(ValueError, match="unexpected keys: command"):
         MetadataDiffRequest.from_payload({"type": "Flow", "command": "deploy"})
     with pytest.raises(ValueError, match="type must be one of"):

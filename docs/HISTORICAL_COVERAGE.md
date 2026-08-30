@@ -11,14 +11,18 @@ family detected in its title and stored goal has an admitted Atlas Next
 capability. A test runner does not count as Apex authoring; metadata name parity
 does not count as Flow repair; a local command does not count as CI delivery.
 
-Current measured coverage is **120/163 tickets (73.62%)**. The current capabilities
+Current measured capability-family coverage is **163/163 tickets (100%)**. The capabilities
 cover bounded investigation/query, metadata/schema inspection, hash-locked Apex
 authoring and testing, active Flow creation/editing with runtime proof, and governed
 commit-to-PR-to-Partial delivery with an exact CI deployment receipt. They also
 perform bounded, schema-validated, all-or-none Partial data repair with verified
 rollback, plus Shine-verified interactive LWC creation with behavioral Jest and live
 Partial metadata proof. Governed report source is also delivered and executed through
-the live Partial Analytics API. The family occurrences across the 163 workflows are:
+the live Partial Analytics API. A bounded Apex REST integration is generated with a
+mocked callout test and Remote Site metadata, delivered through CI, and executed against
+an external API from live Partial. Credential-bound services still require their org's
+principal and secret binding; Atlas neither accepts nor prints those secrets. The family
+occurrences across the 163 workflows are:
 
 - investigation/query: 114
 - metadata/schema/access: 110

@@ -40,6 +40,8 @@ CAPABILITY_FAMILY = {
     "salesforce.verify_lwc_deployment": "lwc_page_experience",
     # Admitted after governed source delivery and live Partial Analytics API execution.
     "salesforce.verify_report_execution": "reporting_analytics",
+    # Admitted after generated callout source, mocked tests, governed deploy, and live execution.
+    "salesforce.verify_integration_execution": "integration_pipeline",
     # A test runner alone is necessary evidence for Apex work, but cannot author or repair it.
     "salesforce.apex_test": None,
 }

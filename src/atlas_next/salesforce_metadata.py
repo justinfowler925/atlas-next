@@ -25,6 +25,7 @@ SUPPORTED_METADATA_TYPES = frozenset(
         "CustomField",
         "CustomObject",
         "CustomPermission",
+        "ExternalCredential",
         "FlexiPage",
         "Flow",
         "Layout",

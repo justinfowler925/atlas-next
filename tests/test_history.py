@@ -139,6 +139,17 @@ def test_reporting_counts_only_after_live_execution_is_admitted():
     assert after["covered_ticket_count"] == 1
 
 
+def test_integration_counts_only_after_live_external_execution_is_admitted():
+    ticket = _ticket("REV-15", "Build exchange-rate callout", "REST endpoint integration")
+    before = coverage_report([ticket], {"salesforce.create_integration_source"})
+    after = coverage_report(
+        [ticket],
+        {"salesforce.verify_integration_execution", "delivery.verify_sandbox_deploy"},
+    )
+    assert before["covered_ticket_count"] == 0
+    assert after["covered_ticket_count"] == 1
+
+
 def test_history_database_is_opened_read_only(tmp_path):
     database = tmp_path / "history.sqlite"
     connection = sqlite3.connect(database)
