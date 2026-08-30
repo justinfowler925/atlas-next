@@ -24,6 +24,7 @@ from atlas_next.delivery import (
     _parse_checks,
     _require_production_checks_skipped,
     _require_production_jobs_skipped,
+    _require_sandbox_checks_success,
 )
 from atlas_next.salesforce import CommandResult
 from atlas_next.salesforce_metadata import SOURCE_RETRIEVE_ACTION
@@ -39,6 +40,17 @@ def test_delivery_requires_production_checks_and_jobs_to_be_explicitly_skipped()
             {
                 "Validate (production)": "SKIPPED",
                 "Deploy (production)": "SUCCESS",
+            }
+        )
+
+
+def test_delivery_requires_every_named_sandbox_check_to_succeed():
+    with pytest.raises(ValueError, match="LWC unit tests did not succeed"):
+        _require_sandbox_checks_success(
+            {
+                "Validate (sandbox)": "SUCCESS",
+                "LWC unit tests": "SKIPPED",
+                "PM Tracker + revops-dash verify": "SUCCESS",
             }
         )
     with pytest.raises(ValueError, match="Validate \\(production\\) was not explicitly skipped"):

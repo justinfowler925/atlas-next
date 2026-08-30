@@ -530,8 +530,7 @@ class VerifyPr:
             bad = sorted(name for name, conclusion in checks.items() if conclusion not in {"SUCCESS", "NEUTRAL", "SKIPPED"})
             if bad:
                 raise ValueError(f"checks are not green: {', '.join(bad)}")
-            if checks["Validate (sandbox)"] != "SUCCESS":
-                raise ValueError("Validate (sandbox) did not succeed")
+            _require_sandbox_checks_success(checks)
             _require_production_checks_skipped(checks)
             self._run(git_root, ["git", "fetch", "origin", "main"])
             current_main = self._run(git_root, ["git", "rev-parse", "origin/main"]).stdout.strip()
@@ -637,8 +636,9 @@ class MergePr:
                 for name, conclusion in checks.items()
                 if conclusion not in {"SUCCESS", "NEUTRAL", "SKIPPED"}
             )
-            if bad or checks["Validate (sandbox)"] != "SUCCESS":
+            if bad:
                 raise ValueError("PR checks are no longer green")
+            _require_sandbox_checks_success(checks)
             _require_production_checks_skipped(checks)
             self._run(git_root, ["git", "fetch", "origin", "main"])
             current_main = self._run(
@@ -846,6 +846,16 @@ def _require_production_checks_skipped(checks: dict[str, str]) -> None:
     for name in ("Validate (production)", "Deploy (production)"):
         if checks.get(name) != "SKIPPED":
             raise ValueError(f"{name} was not explicitly skipped")
+
+
+def _require_sandbox_checks_success(checks: dict[str, str]) -> None:
+    for name in (
+        "Validate (sandbox)",
+        "LWC unit tests",
+        "PM Tracker + revops-dash verify",
+    ):
+        if checks.get(name) != "SUCCESS":
+            raise ValueError(f"{name} did not succeed")
 
 
 def _require_production_jobs_skipped(jobs: list[dict[str, Any]]) -> None:
