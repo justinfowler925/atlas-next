@@ -78,3 +78,8 @@ Atlas-owned artifact directory, excludes transport manifests, hashes every
 source file, and reports content, missing-file, and extra-file differences.
 Wildcards, traversal, arbitrary metadata types, deploy flags, and caller-chosen
 commands cannot reach the subprocess.
+
+`salesforce.apex_test` is the first execution capability and remains Partial
+only. It accepts one to ten exact class API names, proves every class exists in
+the live Partial inventory, runs only those classes with coverage enabled, and
+requires a non-zero, reconciled, passing test summary with a `707` run id.

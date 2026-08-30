@@ -15,6 +15,7 @@ from .salesforce import (
     SalesforcePicklistCounts,
 )
 from .salesforce_query import QUERY_ACTION, SalesforceQuery
+from .salesforce_test import APEX_TEST_ACTION, SalesforceApexTest
 from .salesforce_metadata import (
     METADATA_CONTENT_DIFF_ACTION,
     METADATA_DIFF_ACTION,
@@ -93,6 +94,12 @@ def _parser() -> argparse.ArgumentParser:
     content.add_argument(
         "--artifact-root", type=Path, default=Path(".atlas-next/artifacts/metadata-diff")
     )
+    apex_test = sub.add_parser(
+        "salesforce-apex-test",
+        help="run one to ten named Apex test classes in Partial only",
+    )
+    apex_test.add_argument("classes", nargs="+")
+    apex_test.add_argument("--partial-alias", default="dod-check")
     return parser
 
 
@@ -203,6 +210,13 @@ def main(argv: list[str] | None = None) -> int:
                     project_dir=args.project_dir,
                     artifact_root=args.artifact_root,
                 ),
+            )
+        if args.command == "salesforce-apex-test":
+            return _execute(
+                store,
+                APEX_TEST_ACTION,
+                {"classes": args.classes},
+                SalesforceApexTest(partial_alias=args.partial_alias),
             )
         report = snapshot(
             store,

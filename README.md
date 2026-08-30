@@ -29,7 +29,7 @@ This repository contains the replacement kernel only:
 
 The admitted capabilities are `salesforce.describe`, `salesforce.count`,
 `salesforce.picklist_counts`, `salesforce.query`, `salesforce.metadata_diff`, and
-`salesforce.metadata_content_diff`:
+`salesforce.metadata_content_diff`, plus Partial-only `salesforce.apex_test`:
 hardcoded read-only Salesforce CLI calls for one object in Partial or production.
 Count generates exactly `SELECT COUNT() FROM <validated_object>`; callers cannot
 supply SOQL, filters, fields, command strings, mutation verbs, or arbitrary targets.
@@ -43,6 +43,8 @@ Metadata diff runs the same fixed inventory command in Partial and production
 for one whitelisted metadata type, then reports shared and org-only components.
 Content diff retrieves one exact component from both orgs into Atlas-owned
 artifacts and compares every retrieved source file by SHA-256.
+Named Apex tests are live-validated against Partial metadata, capped at ten
+classes, run with coverage, and succeed only on a reconciled non-zero pass.
 Linear, GitHub, Slack,
 deployment, scheduling, and LLM adapters remain absent. The old Atlas is not a
 runtime dependency.
@@ -77,4 +79,6 @@ atlas-next --db /tmp/atlas-next.sqlite salesforce-query Opportunity \
 atlas-next --db /tmp/atlas-next.sqlite salesforce-metadata-diff Flow
 atlas-next --db /tmp/atlas-next.sqlite salesforce-metadata-content-diff \
   Flow Set_Close_Date_Last_Updated
+atlas-next --db /tmp/atlas-next.sqlite salesforce-apex-test \
+  CsHandoffIntakeSchemaTest
 ```
