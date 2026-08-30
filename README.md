@@ -27,14 +27,17 @@ This repository contains the replacement kernel only:
 - truthful health snapshots;
 - tests for the failure classes that made legacy Atlas untrustworthy.
 
-The admitted capabilities are `salesforce.describe`, `salesforce.count`, and
-`salesforce.picklist_counts`:
+The admitted capabilities are `salesforce.describe`, `salesforce.count`,
+`salesforce.picklist_counts`, and `salesforce.query`:
 hardcoded read-only Salesforce CLI calls for one object in Partial or production.
 Count generates exactly `SELECT COUNT() FROM <validated_object>`; callers cannot
 supply SOQL, filters, fields, command strings, mutation verbs, or arbitrary targets.
 Picklist counts is the only field-level read: it live-validates the field as a
 groupable Salesforce `picklist` before running a generated aggregate capped at
 50 groups, so arbitrary string/PII fields cannot pass.
+Record query accepts structured fields, filters, ordering, and a limit only. It
+live-validates the object and every field, generates SOQL internally, rejects
+relationship paths and encrypted fields, and caps output at 200 records.
 Linear, GitHub, Slack,
 deployment, scheduling, and LLM adapters remain absent. The old Atlas is not a
 runtime dependency.
@@ -62,4 +65,8 @@ atlas-next --db /tmp/atlas-next.sqlite salesforce-count Account \
   --environment partial --partial-alias dod-check
 atlas-next --db /tmp/atlas-next.sqlite salesforce-picklist-counts \
   Opportunity StageName --environment partial --partial-alias dod-check
+atlas-next --db /tmp/atlas-next.sqlite salesforce-query Opportunity \
+  --fields Id,Name,StageName,CloseDate \
+  --filter-json '[{"field":"StageName","operator":"eq","value":"Closed Won"}]' \
+  --order-field CloseDate --order-direction desc --limit 10
 ```

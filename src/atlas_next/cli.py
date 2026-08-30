@@ -14,6 +14,7 @@ from .salesforce import (
     SalesforceDescribe,
     SalesforcePicklistCounts,
 )
+from .salesforce_query import QUERY_ACTION, SalesforceQuery
 from .store import Store
 
 
@@ -50,6 +51,19 @@ def _parser() -> argparse.ArgumentParser:
     picklist.add_argument("--environment", choices=("partial", "prod"), default="partial")
     picklist.add_argument("--partial-alias", default="dod-check")
     picklist.add_argument("--prod-alias", default="prod")
+    query = sub.add_parser(
+        "salesforce-query",
+        help="run a bounded live-schema-validated Salesforce record query",
+    )
+    query.add_argument("object")
+    query.add_argument("--fields", required=True, help="comma-separated field API names")
+    query.add_argument("--filter-json", default="[]", help="structured filter list; never SOQL")
+    query.add_argument("--order-field")
+    query.add_argument("--order-direction", choices=("asc", "desc"), default="asc")
+    query.add_argument("--limit", type=int, default=100)
+    query.add_argument("--environment", choices=("partial", "prod"), default="partial")
+    query.add_argument("--partial-alias", default="dod-check")
+    query.add_argument("--prod-alias", default="prod")
     return parser
 
 
@@ -144,6 +158,48 @@ def main(argv: list[str] | None = None) -> int:
             engine = Engine(
                 store,
                 {PICKLIST_COUNTS_ACTION: capability},
+                worker_id="operator:cli",
+                execution_enabled=True,
+            )
+            run = engine.run_once(work_id=item.id)
+            completed = run.item or store.get(item.id)
+            print(
+                json.dumps(
+                    {
+                        "id": completed.id,
+                        "state": completed.state,
+                        "result": completed.result,
+                        "evidence": completed.evidence,
+                        "error": completed.error,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 0 if completed.state == "succeeded" else 1
+        if args.command == "salesforce-query":
+            filters = json.loads(args.filter_json)
+            if not isinstance(filters, list):
+                raise SystemExit("--filter-json must be a JSON list")
+            payload = {
+                "environment": args.environment,
+                "object": args.object,
+                "fields": [field.strip() for field in args.fields.split(",")],
+                "filters": filters,
+                "limit": args.limit,
+            }
+            if args.order_field:
+                payload["order_by"] = {
+                    "field": args.order_field,
+                    "direction": args.order_direction,
+                }
+            item = store.enqueue(QUERY_ACTION, payload, max_attempts=1)
+            capability = SalesforceQuery(
+                {"partial": args.partial_alias, "prod": args.prod_alias}
+            )
+            engine = Engine(
+                store,
+                {QUERY_ACTION: capability},
                 worker_id="operator:cli",
                 execution_enabled=True,
             )

@@ -59,3 +59,10 @@ negative, or incomplete result fails the ledger item.
 continues only when its type is exactly `picklist` and `groupable=true`. It then
 generates one `GROUP BY` query capped at 50 groups. No caller-supplied filter,
 SOQL, limit, or arbitrary text field can reach Salesforce.
+
+`salesforce.query` is the bounded investigation surface. Callers provide only a
+structured object, field list, typed filters, one optional ordering, and a limit
+of at most 200. Atlas live-describes the object, proves that selected, filtered,
+and ordered fields support the requested operations, escapes every literal, and
+then generates the query. Relationship paths, raw SOQL, shell commands,
+encrypted fields, unbounded results, and undeclared response fields fail closed.
