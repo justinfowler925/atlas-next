@@ -78,6 +78,17 @@ def test_apex_counts_only_after_source_authoring_is_admitted():
     assert after["covered_ticket_count"] == 1
 
 
+def test_flow_counts_only_after_runtime_proof_is_admitted():
+    ticket = _ticket("REV-11", "Repair renewal Flow", "automation deploy")
+    before = coverage_report([ticket], {"salesforce.verify_flow_activation"})
+    after = coverage_report(
+        [ticket],
+        {"salesforce.run_created_flow", "delivery.verify_sandbox_deploy"},
+    )
+    assert before["covered_ticket_count"] == 0
+    assert after["covered_ticket_count"] == 1
+
+
 def test_history_database_is_opened_read_only(tmp_path):
     database = tmp_path / "history.sqlite"
     connection = sqlite3.connect(database)

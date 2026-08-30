@@ -61,7 +61,7 @@ dependency.
 
 Historical coverage is measured against 163 real Salesforce workflows from the
 legacy 200-ticket corpus. See `docs/HISTORICAL_COVERAGE.md`; current strict
-coverage is 24/163 (14.72%), not yet the 80% target.
+coverage is 52/163 (31.90%), not yet the 80% target.
 
 ## Verify
 
@@ -104,6 +104,10 @@ atlas-next --db /tmp/atlas-next.sqlite salesforce-author-source \
 atlas-next --db /tmp/atlas-next.sqlite salesforce-create-flow-source \
   Atlas_Acceptance_Flow --content-file /path/to/flow-meta.xml \
   --project-dir /path/to/isolated-sfdc-worktree/salesforce
+atlas-next --db /tmp/atlas-next.sqlite salesforce-verify-flow-activation \
+  <deploy-work-id> <flow-source-work-id>
+atlas-next --db /tmp/atlas-next.sqlite salesforce-run-created-flow \
+  <activation-work-id> --output-variable result --expected-string atlas-flow-ok
 atlas-next --db /tmp/atlas-next.sqlite commit-source <source-work-id> \
   --message 'chore: capture Partial acceptance service'
 atlas-next --db /tmp/atlas-next.sqlite open-pr <commit-work-id> \

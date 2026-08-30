@@ -32,6 +32,8 @@ CAPABILITY_FAMILY = {
     "delivery.verify_sandbox_deploy": "delivery_ci_release",
     # Admitted for Apex only after hash-locked authoring, governed delivery, and live tests.
     "salesforce.author_source": "apex_logic_tests",
+    # Admitted only after deployed lineage, activation parity, and runtime output proof.
+    "salesforce.run_created_flow": "flow_automation",
     # A test runner alone is necessary evidence for Apex work, but cannot author or repair it.
     "salesforce.apex_test": None,
 }

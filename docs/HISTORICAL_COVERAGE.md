@@ -11,10 +11,11 @@ family detected in its title and stored goal has an admitted Atlas Next
 capability. A test runner does not count as Apex authoring; metadata name parity
 does not count as Flow repair; a local command does not count as CI delivery.
 
-Current measured coverage is **24/163 tickets (14.72%)**. The current capabilities
+Current measured coverage is **52/163 tickets (31.90%)**. The current capabilities
 cover bounded investigation/query, metadata/schema inspection, hash-locked Apex
-authoring and testing, and governed commit-to-PR-to-Partial delivery with an exact
-CI deployment receipt. The family occurrences across the 163 workflows are:
+authoring and testing, active Flow creation/editing with runtime proof, and governed
+commit-to-PR-to-Partial delivery with an exact CI deployment receipt. The family
+occurrences across the 163 workflows are:
 
 - investigation/query: 114
 - metadata/schema/access: 110

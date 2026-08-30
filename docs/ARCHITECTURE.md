@@ -101,6 +101,12 @@ from its validated API name. It requires a clean linked worktree, well-formed
 Salesforce Flow XML, and explicit `Active` status, and it refuses existing paths,
 caller-selected paths, other files, or any direct org operation.
 
+`salesforce.verify_flow_activation` walks the complete source-to-commit-to-PR-to-
+merge-to-deploy ledger lineage before querying Partial's Tooling API and requiring
+`ActiveVersion == LatestVersion`. `salesforce.run_created_flow` then executes only
+that activation-proven Atlas-created Flow and asserts one bounded output value.
+Neither capability has a production target.
+
 `delivery.commit_source` consumes successful source-producing ledger item IDs,
 re-hashes every proven file, requires the complete worktree dirt population to
 equal those files, stages exactly that set, and records the resulting commit SHA.
