@@ -45,6 +45,12 @@ from .salesforce_flow import (
     RunCreatedFlow,
     VerifyFlowActivation,
 )
+from .salesforce_data import (
+    ROLLBACK_UPDATE_ACTION,
+    UPDATE_RECORDS_ACTION,
+    SalesforceRollbackUpdate,
+    SalesforceUpdateRecords,
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -161,6 +167,25 @@ def _parser() -> argparse.ArgumentParser:
     run_flow.add_argument("--expected-string", required=True)
     run_flow.add_argument("--partial-alias", default="dod-check")
     run_flow.add_argument("--artifact-root", type=Path, default=Path(".atlas-next/artifacts"))
+    update_records = sub.add_parser(
+        "salesforce-update-records",
+        help="atomically update 1-10 schema-validated Partial records",
+    )
+    update_records.add_argument("object")
+    update_records.add_argument("--records-json", required=True)
+    update_records.add_argument("--reason", required=True)
+    update_records.add_argument("--partial-alias", default="dod-check")
+    update_records.add_argument(
+        "--artifact-root", type=Path, default=Path(".atlas-next/artifacts")
+    )
+    rollback = sub.add_parser(
+        "salesforce-rollback-update",
+        help="restore an Atlas update only when its verified post-state has not drifted",
+    )
+    rollback.add_argument("update_work_id")
+    rollback.add_argument("--reason", required=True)
+    rollback.add_argument("--partial-alias", default="dod-check")
+    rollback.add_argument("--artifact-root", type=Path, default=Path(".atlas-next/artifacts"))
     commit = sub.add_parser(
         "commit-source",
         help="commit only files proven by successful source-producing work items",
@@ -359,6 +384,28 @@ def main(argv: list[str] | None = None) -> int:
                     "expected_string": args.expected_string,
                 },
                 RunCreatedFlow(
+                    store,
+                    partial_alias=args.partial_alias,
+                    artifact_root=args.artifact_root,
+                ),
+            )
+        if args.command == "salesforce-update-records":
+            records = json.loads(args.records_json)
+            return _execute(
+                store,
+                UPDATE_RECORDS_ACTION,
+                {"object": args.object, "records": records, "reason": args.reason},
+                SalesforceUpdateRecords(
+                    partial_alias=args.partial_alias,
+                    artifact_root=args.artifact_root,
+                ),
+            )
+        if args.command == "salesforce-rollback-update":
+            return _execute(
+                store,
+                ROLLBACK_UPDATE_ACTION,
+                {"update_work_id": args.update_work_id, "reason": args.reason},
+                SalesforceRollbackUpdate(
                     store,
                     partial_alias=args.partial_alias,
                     artifact_root=args.artifact_root,

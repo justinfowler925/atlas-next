@@ -107,6 +107,14 @@ merge-to-deploy ledger lineage before querying Partial's Tooling API and requiri
 that activation-proven Atlas-created Flow and asserts one bounded output value.
 Neither capability has a production target.
 
+`salesforce.update_records` accepts 1–10 exact Partial record IDs and structured
+field values. It live-describes the object, validates key prefixes, updateability,
+types, lengths, nullability, encryption, and picklist values, captures the exact
+before-state, applies one REST composite `allOrNone` PATCH, then queries and proves
+the post-state. `salesforce.rollback_update` restores that before-state only when
+the current records still hash to the original verified after-state, preventing a
+rollback from overwriting newer work. Neither action can target production.
+
 `delivery.commit_source` consumes successful source-producing ledger item IDs,
 re-hashes every proven file, requires the complete worktree dirt population to
 equal those files, stages exactly that set, and records the resulting commit SHA.

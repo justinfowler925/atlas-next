@@ -108,6 +108,11 @@ atlas-next --db /tmp/atlas-next.sqlite salesforce-verify-flow-activation \
   <deploy-work-id> <flow-source-work-id>
 atlas-next --db /tmp/atlas-next.sqlite salesforce-run-created-flow \
   <activation-work-id> --output-variable result --expected-string atlas-flow-ok
+atlas-next --db /tmp/atlas-next.sqlite salesforce-update-records Account \
+  --records-json '[{"id":"001...","fields":{"Description":"repaired"}}]' \
+  --reason 'Repair approved test record state'
+atlas-next --db /tmp/atlas-next.sqlite salesforce-rollback-update \
+  <update-work-id> --reason 'Restore acceptance baseline after proof'
 atlas-next --db /tmp/atlas-next.sqlite commit-source <source-work-id> \
   --message 'chore: capture Partial acceptance service'
 atlas-next --db /tmp/atlas-next.sqlite open-pr <commit-work-id> \
