@@ -11,6 +11,7 @@ from atlas_next.delivery import (
     MERGE_PR_ACTION,
     OPEN_PR_ACTION,
     VERIFY_PR_ACTION,
+    VERIFY_SANDBOX_DEPLOY_ACTION,
     CommitSource,
     CommitSourceRequest,
     MergePr,
@@ -18,6 +19,8 @@ from atlas_next.delivery import (
     OpenPr,
     OpenPullRequest,
     VerifyPr,
+    VerifySandboxDeploy,
+    VerifySandboxDeployRequest,
     _parse_checks,
 )
 from atlas_next.salesforce import CommandResult
@@ -460,3 +463,141 @@ def test_merge_pr_refuses_changed_head_before_merge(tmp_path):
     assert merged is False
     assert completed is not None and completed.state is WorkState.FAILED
     assert "head changed" in (completed.error or "")
+
+
+def test_verify_sandbox_deploy_contract_has_no_run_or_environment_escape():
+    with pytest.raises(ValueError, match="unexpected keys: run_id"):
+        VerifySandboxDeployRequest.from_payload(
+            {"merge_pr_work_id": "one", "run_id": 123}
+        )
+
+
+def test_verify_sandbox_deploy_links_exact_merge_to_successful_job(tmp_path):
+    git_root = tmp_path / "worktree"
+    git_root.mkdir()
+    merge_sha = "c" * 40
+    run_id = 123
+    job_id = 456
+    commands = []
+    with Store(tmp_path / "state.sqlite3") as store:
+        merged = store.enqueue(MERGE_PR_ACTION, {})
+        assert store.claim(merged.id, "merger") is not None
+        store.succeed(
+            merged.id,
+            "merger",
+            result={"git_root": str(git_root), "merge_sha": merge_sha},
+            evidence=[{"kind": MERGE_PR_ACTION}],
+        )
+
+        def runner(argv, _cwd, _timeout):
+            commands.append(list(argv))
+            if argv[:3] == ["gh", "run", "list"]:
+                return CommandResult(
+                    0,
+                    json.dumps(
+                        [
+                            {
+                                "databaseId": run_id,
+                                "headSha": merge_sha,
+                                "status": "completed",
+                                "conclusion": "success",
+                                "workflowName": "Salesforce CI",
+                                "url": "https://github.test/run/123",
+                                "event": "push",
+                            }
+                        ]
+                    ),
+                    "",
+                )
+            if argv[:3] == ["gh", "run", "view"]:
+                return CommandResult(
+                    0,
+                    json.dumps(
+                        {
+                            "status": "completed",
+                            "conclusion": "success",
+                            "headBranch": "main",
+                            "headSha": merge_sha,
+                            "workflowName": "Salesforce CI",
+                            "url": "https://github.test/run/123",
+                            "jobs": [
+                                {
+                                    "name": "Deploy (sandbox)",
+                                    "databaseId": job_id,
+                                    "conclusion": "success",
+                                },
+                                {
+                                    "name": "Deploy (production)",
+                                    "databaseId": 789,
+                                    "conclusion": "skipped",
+                                },
+                            ],
+                        }
+                    ),
+                    "",
+                )
+            return CommandResult(0, "", "")
+
+        item = store.enqueue(
+            VERIFY_SANDBOX_DEPLOY_ACTION, {"merge_pr_work_id": merged.id}
+        )
+        completed = Engine(
+            store,
+            {VERIFY_SANDBOX_DEPLOY_ACTION: VerifySandboxDeploy(store, runner=runner)},
+            worker_id="test",
+            execution_enabled=True,
+        ).run_once(work_id=item.id).item
+
+    assert ["gh", "run", "watch", str(run_id), "--exit-status"] in commands
+    assert completed is not None and completed.state is WorkState.SUCCEEDED
+    assert completed.result["deploy_job_id"] == job_id
+    assert completed.evidence[0]["production_write"] is False
+
+
+def test_verify_sandbox_deploy_refuses_wrong_merge_or_failed_deploy(tmp_path):
+    git_root = tmp_path / "worktree"
+    git_root.mkdir()
+    merge_sha = "c" * 40
+    watched = False
+    with Store(tmp_path / "state.sqlite3") as store:
+        merged = store.enqueue(MERGE_PR_ACTION, {})
+        assert store.claim(merged.id, "merger") is not None
+        store.succeed(
+            merged.id,
+            "merger",
+            result={"git_root": str(git_root), "merge_sha": merge_sha},
+            evidence=[{"kind": MERGE_PR_ACTION}],
+        )
+
+        def runner(argv, _cwd, _timeout):
+            nonlocal watched
+            if argv[:3] == ["gh", "run", "watch"]:
+                watched = True
+            return CommandResult(
+                0,
+                json.dumps(
+                    [
+                        {
+                            "databaseId": 123,
+                            "headSha": "d" * 40,
+                            "workflowName": "Salesforce CI",
+                            "event": "push",
+                        }
+                    ]
+                ),
+                "",
+            )
+
+        item = store.enqueue(
+            VERIFY_SANDBOX_DEPLOY_ACTION, {"merge_pr_work_id": merged.id}
+        )
+        completed = Engine(
+            store,
+            {VERIFY_SANDBOX_DEPLOY_ACTION: VerifySandboxDeploy(store, runner=runner)},
+            worker_id="test",
+            execution_enabled=True,
+        ).run_once(work_id=item.id).item
+
+    assert watched is False
+    assert completed is not None and completed.state is WorkState.FAILED
+    assert "does not match" in (completed.error or "")

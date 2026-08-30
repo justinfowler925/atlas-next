@@ -21,6 +21,7 @@ COMMIT_SOURCE_ACTION = "delivery.commit_source"
 OPEN_PR_ACTION = "delivery.open_pr"
 VERIFY_PR_ACTION = "delivery.verify_pr"
 MERGE_PR_ACTION = "delivery.merge_pr"
+VERIFY_SANDBOX_DEPLOY_ACTION = "delivery.verify_sandbox_deploy"
 _MESSAGE_RE = re.compile(r"^(feat|fix|chore|test|docs|refactor): [^\r\n]{3,100}$")
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -130,6 +131,31 @@ class MergePullRequest:
         value = payload["verify_pr_work_id"]
         if not isinstance(value, str) or not value:
             raise ValueError("verify_pr_work_id must be non-empty text")
+        return cls(value)
+
+
+@dataclass(frozen=True)
+class VerifySandboxDeployRequest:
+    merge_pr_work_id: str
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> VerifySandboxDeployRequest:
+        if set(payload) != {"merge_pr_work_id"}:
+            unexpected = sorted(set(payload) - {"merge_pr_work_id"})
+            missing = sorted({"merge_pr_work_id"} - set(payload))
+            details = []
+            if missing:
+                details.append("missing keys: merge_pr_work_id")
+            if unexpected:
+                details.append(f"unexpected keys: {', '.join(unexpected)}")
+            raise ValueError(
+                "invalid delivery.verify_sandbox_deploy payload ("
+                + "; ".join(details)
+                + ")"
+            )
+        value = payload["merge_pr_work_id"]
+        if not isinstance(value, str) or not value:
+            raise ValueError("merge_pr_work_id must be non-empty text")
         return cls(value)
 
 
@@ -678,6 +704,122 @@ class MergePr:
         completed = self.runner(argv, cwd, self.timeout_seconds)
         if completed.returncode != 0:
             raise ValueError(f"PR merge command failed: {_failure_detail(completed)}")
+        return completed
+
+
+class VerifySandboxDeploy:
+    """Prove the exact merge SHA completed the governed Partial deployment job."""
+
+    def __init__(
+        self,
+        store: Store,
+        *,
+        runner: ProjectRunner = run_project_command,
+        timeout_seconds: float = 1800,
+    ) -> None:
+        self.store = store
+        self.runner = runner
+        self.timeout_seconds = timeout_seconds
+
+    def __call__(self, item: WorkItem) -> Outcome:
+        try:
+            request = VerifySandboxDeployRequest.from_payload(item.payload)
+            merged = self.store.get(request.merge_pr_work_id)
+            if merged is None or merged.state is not WorkState.SUCCEEDED:
+                raise ValueError("merge PR work item is missing or unsuccessful")
+            if merged.action != MERGE_PR_ACTION:
+                raise ValueError("referenced work item is not a merge PR receipt")
+            git_root = Path(str(merged.result.get("git_root", ""))).resolve()
+            merge_sha = str(merged.result.get("merge_sha", ""))
+            if not git_root.is_dir() or not _SHA_RE.fullmatch(merge_sha):
+                raise ValueError("merge PR receipt is incomplete")
+            runs_raw = self._run(
+                git_root,
+                [
+                    "gh", "run", "list", "--workflow", "Salesforce CI", "--branch", "main",
+                    "--commit", merge_sha, "--limit", "10", "--json",
+                    "databaseId,headSha,status,conclusion,workflowName,url,event",
+                ],
+            ).stdout
+            runs = json.loads(runs_raw)
+            if not isinstance(runs, list) or len(runs) != 1:
+                raise ValueError("expected exactly one Salesforce CI run for the merge SHA")
+            run = runs[0]
+            run_id = run.get("databaseId")
+            if (
+                isinstance(run_id, bool)
+                or not isinstance(run_id, int)
+                or run.get("headSha") != merge_sha
+                or run.get("workflowName") != "Salesforce CI"
+                or run.get("event") != "push"
+            ):
+                raise ValueError("Salesforce CI run receipt does not match the merge")
+            watched = self.runner(
+                ["gh", "run", "watch", str(run_id), "--exit-status"],
+                git_root,
+                self.timeout_seconds,
+            )
+            if watched.returncode != 0:
+                raise ValueError(f"Salesforce CI failed: {_failure_detail(watched)}")
+            detail_raw = self._run(
+                git_root,
+                [
+                    "gh", "run", "view", str(run_id), "--json",
+                    "conclusion,headBranch,headSha,jobs,status,url,workflowName",
+                ],
+            ).stdout
+            detail = json.loads(detail_raw)
+            if (
+                detail.get("status") != "completed"
+                or detail.get("conclusion") != "success"
+                or detail.get("headBranch") != "main"
+                or detail.get("headSha") != merge_sha
+                or detail.get("workflowName") != "Salesforce CI"
+            ):
+                raise ValueError("Salesforce CI did not complete successfully for merged main")
+            jobs = detail.get("jobs")
+            if not isinstance(jobs, list):
+                raise ValueError("Salesforce CI returned no job receipts")
+            deploys = [job for job in jobs if job.get("name") == "Deploy (sandbox)"]
+            if len(deploys) != 1 or deploys[0].get("conclusion") != "success":
+                raise ValueError("Deploy (sandbox) did not succeed exactly once")
+            deploy = deploys[0]
+            job_id = deploy.get("databaseId")
+            if isinstance(job_id, bool) or not isinstance(job_id, int):
+                raise ValueError("Deploy (sandbox) job receipt is incomplete")
+        except (ValueError, OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+            return Outcome.failed(f"verify sandbox deploy refused: {exc}")
+
+        result = {
+            "git_root": str(git_root),
+            "merge_sha": merge_sha,
+            "run_id": run_id,
+            "run_url": detail["url"],
+            "deploy_job_id": job_id,
+            "merge_pr_work_id": request.merge_pr_work_id,
+        }
+        evidence = [
+            {
+                "kind": VERIFY_SANDBOX_DEPLOY_ACTION,
+                "repository": "ClearspeedRevOps/sfdc",
+                "merge_sha": merge_sha,
+                "workflow": "Salesforce CI",
+                "run_id": run_id,
+                "run_url": detail["url"],
+                "run_conclusion": "success",
+                "deploy_job": "Deploy (sandbox)",
+                "deploy_job_id": job_id,
+                "deploy_conclusion": "success",
+                "environment": "partial",
+                "production_write": False,
+            }
+        ]
+        return Outcome.success(result, evidence)
+
+    def _run(self, cwd: Path, argv: Sequence[str]) -> CommandResult:
+        completed = self.runner(argv, cwd, self.timeout_seconds)
+        if completed.returncode != 0:
+            raise ValueError(f"sandbox deploy command failed: {_failure_detail(completed)}")
         return completed
 
 

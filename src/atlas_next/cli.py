@@ -9,10 +9,12 @@ from .delivery import (
     MERGE_PR_ACTION,
     OPEN_PR_ACTION,
     VERIFY_PR_ACTION,
+    VERIFY_SANDBOX_DEPLOY_ACTION,
     CommitSource,
     MergePr,
     OpenPr,
     VerifyPr,
+    VerifySandboxDeploy,
 )
 from .health import snapshot
 from .engine import Engine, Handler
@@ -143,6 +145,11 @@ def _parser() -> argparse.ArgumentParser:
         help="re-verify and squash-merge one verified current-main SFDC pull request",
     )
     merge_pr.add_argument("verify_pr_work_id")
+    verify_deploy = sub.add_parser(
+        "verify-sandbox-deploy",
+        help="prove the exact merged SHA completed the governed Partial deployment",
+    )
+    verify_deploy.add_argument("merge_pr_work_id")
     return parser
 
 
@@ -302,6 +309,13 @@ def main(argv: list[str] | None = None) -> int:
                 MERGE_PR_ACTION,
                 {"verify_pr_work_id": args.verify_pr_work_id},
                 MergePr(store),
+            )
+        if args.command == "verify-sandbox-deploy":
+            return _execute(
+                store,
+                VERIFY_SANDBOX_DEPLOY_ACTION,
+                {"merge_pr_work_id": args.merge_pr_work_id},
+                VerifySandboxDeploy(store),
             )
         report = snapshot(
             store,
