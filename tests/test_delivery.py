@@ -26,6 +26,7 @@ from atlas_next.delivery import (
 from atlas_next.salesforce import CommandResult
 from atlas_next.salesforce_metadata import SOURCE_RETRIEVE_ACTION
 from atlas_next.source_author import AUTHOR_SOURCE_ACTION
+from atlas_next.flow_source import CREATE_FLOW_SOURCE_ACTION
 
 
 def test_commit_contract_rejects_commands_paths_and_bad_messages():
@@ -39,7 +40,10 @@ def test_commit_contract_rejects_commands_paths_and_bad_messages():
         )
 
 
-@pytest.mark.parametrize("source_action", [SOURCE_RETRIEVE_ACTION, AUTHOR_SOURCE_ACTION])
+@pytest.mark.parametrize(
+    "source_action",
+    [SOURCE_RETRIEVE_ACTION, AUTHOR_SOURCE_ACTION, CREATE_FLOW_SOURCE_ACTION],
+)
 def test_commit_stages_exact_evidence_linked_files_and_returns_sha(tmp_path, source_action):
     git_root = tmp_path / "worktree"
     path = "salesforce/force-app/main/default/classes/Service.cls"

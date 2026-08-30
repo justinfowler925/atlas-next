@@ -38,6 +38,7 @@ from .salesforce_metadata import (
 )
 from .store import Store
 from .source_author import AUTHOR_SOURCE_ACTION, AuthorSource
+from .flow_source import CREATE_FLOW_SOURCE_ACTION, CreateFlowSource
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -131,6 +132,13 @@ def _parser() -> argparse.ArgumentParser:
     author.add_argument("--path", required=True)
     author.add_argument("--expected-sha256", required=True)
     author.add_argument("--content-file", type=Path, required=True)
+    create_flow = sub.add_parser(
+        "salesforce-create-flow-source",
+        help="create one active Flow XML file in a clean isolated worktree",
+    )
+    create_flow.add_argument("name")
+    create_flow.add_argument("--content-file", type=Path, required=True)
+    create_flow.add_argument("--project-dir", type=Path, required=True)
     commit = sub.add_parser(
         "commit-source",
         help="commit only files proven by successful source-producing work items",
@@ -298,6 +306,16 @@ def main(argv: list[str] | None = None) -> int:
                     "content": args.content_file.read_text(encoding="utf-8"),
                 },
                 AuthorSource(store),
+            )
+        if args.command == "salesforce-create-flow-source":
+            return _execute(
+                store,
+                CREATE_FLOW_SOURCE_ACTION,
+                {
+                    "name": args.name,
+                    "content": args.content_file.read_text(encoding="utf-8"),
+                },
+                CreateFlowSource(project_dir=args.project_dir),
             )
         if args.command == "commit-source":
             return _execute(

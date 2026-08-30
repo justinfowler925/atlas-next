@@ -101,6 +101,9 @@ atlas-next --db /tmp/atlas-next.sqlite salesforce-retrieve-source \
 atlas-next --db /tmp/atlas-next.sqlite salesforce-author-source \
   <retrieve-work-id> --path salesforce/force-app/main/default/classes/Service.cls \
   --expected-sha256 <retrieved-sha256> --content-file /path/to/replacement.cls
+atlas-next --db /tmp/atlas-next.sqlite salesforce-create-flow-source \
+  Atlas_Acceptance_Flow --content-file /path/to/flow-meta.xml \
+  --project-dir /path/to/isolated-sfdc-worktree/salesforce
 atlas-next --db /tmp/atlas-next.sqlite commit-source <source-work-id> \
   --message 'chore: capture Partial acceptance service'
 atlas-next --db /tmp/atlas-next.sqlite open-pr <commit-work-id> \

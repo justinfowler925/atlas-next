@@ -96,6 +96,11 @@ still matches. It rejects unrelated dirt, traversal, malformed XML, oversized
 content, renamed Apex declarations, and identical replacements. It writes only
 the isolated branch; deployment still requires the governed delivery chain.
 
+`salesforce.create_flow_source` creates one new Flow at a path derived entirely
+from its validated API name. It requires a clean linked worktree, well-formed
+Salesforce Flow XML, and explicit `Active` status, and it refuses existing paths,
+caller-selected paths, other files, or any direct org operation.
+
 `delivery.commit_source` consumes successful source-producing ledger item IDs,
 re-hashes every proven file, requires the complete worktree dirt population to
 equal those files, stages exactly that set, and records the resulting commit SHA.
