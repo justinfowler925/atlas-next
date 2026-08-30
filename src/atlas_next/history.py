@@ -38,6 +38,8 @@ CAPABILITY_FAMILY = {
     "salesforce.update_records": "data_repair_migration",
     # Admitted after Shine usability, behavioral Jest, governed deploy, and live metadata proof.
     "salesforce.verify_lwc_deployment": "lwc_page_experience",
+    # Admitted after governed source delivery and live Partial Analytics API execution.
+    "salesforce.verify_report_execution": "reporting_analytics",
     # A test runner alone is necessary evidence for Apex work, but cannot author or repair it.
     "salesforce.apex_test": None,
 }
@@ -77,8 +79,9 @@ _RULES = {
         r"migration|re-parent|reparent|delete .*record|assignment|write-back|sync contacts", re.I
     ),
     "integration_pipeline": re.compile(
-        r"salesforce_integration|integration|zoom|teams meeting|hubspot|slack|google|"
-        r"calendar|webhook|warehouse|superset|pipeline|rest endpoint|api", re.I
+        r"salesforce_integration|\bintegration\b|zoom|teams meeting|hubspot|slack|google|"
+        r"calendar|webhook|rest endpoint|\bcallout\b|named credential|external credential|"
+        r"connected app|activity capture|meeting[- ]ingestion|\bsync\b", re.I
     ),
     "delivery_ci_release": re.compile(
         r"salesforce_deploy|salesforce_deployment|\bdeploy\b|\bci\b|github|prod rollout|"

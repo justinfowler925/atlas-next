@@ -37,6 +37,24 @@ def test_history_classifier_is_multilabel_for_real_compound_work():
     }
 
 
+def test_history_classifier_does_not_treat_sf_api_names_or_ci_as_integrations():
+    ticket = _ticket(
+        "REV-4",
+        "Repair Flow and deploy",
+        "Query FlowDefinitionView ApiName, then use the CI deployment pipeline",
+    )
+    assert "integration_pipeline" not in classify(ticket)
+
+
+def test_history_classifier_detects_external_salesforce_callout_work():
+    ticket = _ticket(
+        "REV-5",
+        "Repair HubSpot catalog callout",
+        "Update the Named Credential and live sync",
+    )
+    assert "integration_pipeline" in classify(ticket)
+
+
 def test_coverage_requires_every_family_for_a_ticket():
     tickets = [
         _ticket("REV-1", "Audit stale field", "salesforce_soql and metadata"),
@@ -105,6 +123,17 @@ def test_lwc_counts_only_after_live_deployment_proof_is_admitted():
     after = coverage_report(
         [ticket],
         {"salesforce.verify_lwc_deployment", "delivery.verify_sandbox_deploy"},
+    )
+    assert before["covered_ticket_count"] == 0
+    assert after["covered_ticket_count"] == 1
+
+
+def test_reporting_counts_only_after_live_execution_is_admitted():
+    ticket = _ticket("REV-14", "Build opportunity report", "analytics deploy")
+    before = coverage_report([ticket], {"salesforce.create_report_source"})
+    after = coverage_report(
+        [ticket],
+        {"salesforce.verify_report_execution", "delivery.verify_sandbox_deploy"},
     )
     assert before["covered_ticket_count"] == 0
     assert after["covered_ticket_count"] == 1
