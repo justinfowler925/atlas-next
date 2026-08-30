@@ -53,13 +53,15 @@ Open PR accepts only successful commit work-item IDs, proves their branch contai
 current `origin/main`, pushes that exact HEAD, and targets `ClearspeedRevOps/sfdc`.
 Verify PR waits for GitHub checks, requires the sandbox validation and sibling
 gates to exist and finish green, and re-proves that HEAD contains current main.
-Linear, GitHub, Slack,
-deployment, scheduling, and LLM adapters remain absent. The old Atlas is not a
-runtime dependency.
+The delivery chain then head-locks the squash merge and admits delivery coverage
+only after the exact merge SHA has a successful `Salesforce CI`
+`Deploy (sandbox)` job. Production writes are not available. Linear, Slack,
+scheduling, and LLM adapters remain absent. The old Atlas is not a runtime
+dependency.
 
 Historical coverage is measured against 163 real Salesforce workflows from the
 legacy 200-ticket corpus. See `docs/HISTORICAL_COVERAGE.md`; current strict
-coverage is 13/163 (7.98%), not yet the 80% target.
+coverage is 20/163 (12.27%), not yet the 80% target.
 
 ## Verify
 

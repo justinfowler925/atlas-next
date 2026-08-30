@@ -28,6 +28,8 @@ CAPABILITY_FAMILY = {
     "salesforce.query": "investigation_query",
     "salesforce.metadata_diff": "metadata_schema_access",
     "salesforce.metadata_content_diff": "metadata_schema_access",
+    # Admitted only at the end of the evidence-linked commit -> PR -> CI -> Partial chain.
+    "delivery.verify_sandbox_deploy": "delivery_ci_release",
     # A test runner is necessary evidence for Apex work, but cannot author or repair Apex.
     "salesforce.apex_test": None,
 }

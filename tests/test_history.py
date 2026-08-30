@@ -52,6 +52,15 @@ def test_coverage_requires_every_family_for_a_ticket():
     assert report["admitted_families"] == ["investigation_query", "metadata_schema_access"]
 
 
+def test_delivery_counts_only_after_governed_sandbox_deploy_receipt():
+    ticket = _ticket("REV-9", "Deploy release", "git PR CI go-live")
+    before = coverage_report([ticket], {"delivery.verify_pr"})
+    after = coverage_report([ticket], {"delivery.verify_sandbox_deploy"})
+    assert before["covered_ticket_count"] == 0
+    assert after["covered_ticket_count"] == 1
+    assert after["admitted_families"] == ["delivery_ci_release"]
+
+
 def test_history_database_is_opened_read_only(tmp_path):
     database = tmp_path / "history.sqlite"
     connection = sqlite3.connect(database)

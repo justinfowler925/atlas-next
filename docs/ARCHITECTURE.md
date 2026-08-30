@@ -105,3 +105,10 @@ not merge, deploy, or infer that CI passed.
 validation, LWC, and RevOps release gates to exist, rejects every non-green
 non-skipped check, refreshes `origin/main`, and proves both the GitHub base and
 the evidence-linked head are cleanly mergeable on that current base.
+
+`delivery.merge_pr` consumes only that verification receipt, rechecks the head,
+current main, checks, and clean merge state, then squash-merges with GitHub's
+head-SHA lock. `delivery.verify_sandbox_deploy` links the immutable merge SHA to
+exactly one successful `Salesforce CI` push run and its successful
+`Deploy (sandbox)` job. This final receipt is the only capability admitted for
+historical delivery/CI/release coverage; production remains untouched.
