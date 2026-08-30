@@ -14,6 +14,7 @@ from .salesforce import (
     SalesforceDescribe,
     SalesforcePicklistCounts,
 )
+from .salesforce_deploy import DRY_RUN_ACTION, SalesforceDeployDryRun
 from .salesforce_query import QUERY_ACTION, SalesforceQuery
 from .salesforce_test import APEX_TEST_ACTION, SalesforceApexTest
 from .salesforce_metadata import (
@@ -100,6 +101,18 @@ def _parser() -> argparse.ArgumentParser:
     )
     apex_test.add_argument("classes", nargs="+")
     apex_test.add_argument("--partial-alias", default="dod-check")
+    dry_run = sub.add_parser(
+        "salesforce-deploy-dry-run",
+        help="validate exact project source files with named tests in Partial without saving",
+    )
+    dry_run.add_argument("source_paths", nargs="+")
+    dry_run.add_argument("--tests", nargs="+", required=True)
+    dry_run.add_argument("--partial-alias", default="dod-check")
+    dry_run.add_argument(
+        "--project-dir",
+        type=Path,
+        default=Path("/Users/justinfowler/Projects/sfdc/salesforce"),
+    )
     return parser
 
 
@@ -217,6 +230,16 @@ def main(argv: list[str] | None = None) -> int:
                 APEX_TEST_ACTION,
                 {"classes": args.classes},
                 SalesforceApexTest(partial_alias=args.partial_alias),
+            )
+        if args.command == "salesforce-deploy-dry-run":
+            return _execute(
+                store,
+                DRY_RUN_ACTION,
+                {"source_paths": args.source_paths, "tests": args.tests},
+                SalesforceDeployDryRun(
+                    partial_alias=args.partial_alias,
+                    project_dir=args.project_dir,
+                ),
             )
         report = snapshot(
             store,

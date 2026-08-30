@@ -45,6 +45,8 @@ Content diff retrieves one exact component from both orgs into Atlas-owned
 artifacts and compares every retrieved source file by SHA-256.
 Named Apex tests are live-validated against Partial metadata, capped at ten
 classes, run with coverage, and succeed only on a reconciled non-zero pass.
+Deploy dry-run validates exact source-controlled metadata files with explicit
+tests in Partial, requires a completed check-only `0Af` receipt, and never saves.
 Linear, GitHub, Slack,
 deployment, scheduling, and LLM adapters remain absent. The old Atlas is not a
 runtime dependency.
@@ -81,4 +83,7 @@ atlas-next --db /tmp/atlas-next.sqlite salesforce-metadata-content-diff \
   Flow Set_Close_Date_Last_Updated
 atlas-next --db /tmp/atlas-next.sqlite salesforce-apex-test \
   CsHandoffIntakeSchemaTest
+atlas-next --db /tmp/atlas-next.sqlite salesforce-deploy-dry-run \
+  force-app/main/default/flows/Set_Close_Date_Last_Updated.flow-meta.xml \
+  --tests CsHandoffIntakeSchemaTest
 ```
