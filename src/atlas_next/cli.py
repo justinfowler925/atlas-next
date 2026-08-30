@@ -39,6 +39,12 @@ from .salesforce_metadata import (
 from .store import Store
 from .source_author import AUTHOR_SOURCE_ACTION, AuthorSource
 from .flow_source import CREATE_FLOW_SOURCE_ACTION, CreateFlowSource
+from .salesforce_flow import (
+    RUN_CREATED_FLOW_ACTION,
+    VERIFY_FLOW_ACTIVATION_ACTION,
+    RunCreatedFlow,
+    VerifyFlowActivation,
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -139,6 +145,22 @@ def _parser() -> argparse.ArgumentParser:
     create_flow.add_argument("name")
     create_flow.add_argument("--content-file", type=Path, required=True)
     create_flow.add_argument("--project-dir", type=Path, required=True)
+    verify_flow = sub.add_parser(
+        "salesforce-verify-flow-activation",
+        help="prove an Atlas-created Flow has ActiveVersion equal to LatestVersion",
+    )
+    verify_flow.add_argument("deploy_work_id")
+    verify_flow.add_argument("source_work_id")
+    verify_flow.add_argument("--partial-alias", default="dod-check")
+    run_flow = sub.add_parser(
+        "salesforce-run-created-flow",
+        help="execute an activation-proven Atlas-created Flow and assert one output",
+    )
+    run_flow.add_argument("activation_work_id")
+    run_flow.add_argument("--output-variable", required=True)
+    run_flow.add_argument("--expected-string", required=True)
+    run_flow.add_argument("--partial-alias", default="dod-check")
+    run_flow.add_argument("--artifact-root", type=Path, default=Path(".atlas-next/artifacts"))
     commit = sub.add_parser(
         "commit-source",
         help="commit only files proven by successful source-producing work items",
@@ -316,6 +338,31 @@ def main(argv: list[str] | None = None) -> int:
                     "content": args.content_file.read_text(encoding="utf-8"),
                 },
                 CreateFlowSource(project_dir=args.project_dir),
+            )
+        if args.command == "salesforce-verify-flow-activation":
+            return _execute(
+                store,
+                VERIFY_FLOW_ACTIVATION_ACTION,
+                {
+                    "deploy_work_id": args.deploy_work_id,
+                    "source_work_id": args.source_work_id,
+                },
+                VerifyFlowActivation(store, partial_alias=args.partial_alias),
+            )
+        if args.command == "salesforce-run-created-flow":
+            return _execute(
+                store,
+                RUN_CREATED_FLOW_ACTION,
+                {
+                    "activation_work_id": args.activation_work_id,
+                    "output_variable": args.output_variable,
+                    "expected_string": args.expected_string,
+                },
+                RunCreatedFlow(
+                    store,
+                    partial_alias=args.partial_alias,
+                    artifact_root=args.artifact_root,
+                ),
             )
         if args.command == "commit-source":
             return _execute(
