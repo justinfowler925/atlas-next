@@ -1,0 +1,169 @@
+# Architecture
+
+## Boundary
+
+Atlas Next replaces the legacy orchestration layer. It does not port the legacy
+worker loop, conductor, retry gates, launchd inventory, health aggregators, or
+multiple ledgers.
+
+Potentially reusable code is admitted later only as a capability adapter with a
+typed input, deterministic validation, structured evidence, and no direct write
+to the work ledger. This includes Salesforce recipes and external-system clients.
+
+## State machine
+
+```text
+queued -> running -> succeeded
+                  -> blocked
+                  -> failed
+                  -> queued   (only when the handler explicitly marks a failure
+                               retryable and attempts remain)
+```
+
+An expired lease becomes `failed`. It is never silently reclaimed. Recovery is
+an operator decision that creates a visible event.
+
+## Authority
+
+- `Store` is the only component allowed to mutate work state.
+- `Engine` maps an action to one registered handler and translates its typed
+  outcome into one store transition.
+- A handler may touch an external system, but cannot declare success without at
+  least one structured evidence record.
+- Health reads effective executor configuration and handler coverage. A dormant
+  executor is `paused`, not healthy.
+- Every Partial-only executor resolves its target immediately before execution and
+  requires org `00DU700000CBa9JMAT`, principal
+  `ci.deploy@clearspeed.com.partial`, and the Partial sandbox domain. Alias names are
+  not authority; an alias repointed to production fails before any test, Flow, PATCH,
+  rollback, or credential-bound callout runs.
+
+## Migration rule
+
+No legacy module is copied wholesale. Each imported capability must pass a
+contract test against its real external layer and must remain callable without an
+LLM. Migration starts with read-only Salesforce inspection, then sandbox writes,
+then delivery handback. Production writes remain out of scope until separately
+authorized and proven.
+
+## Admitted capability: Salesforce describe
+
+`salesforce.describe` is the first vertical slice. Its request has exactly two
+fields (`environment`, `object`), its environment is exactly `partial` or `prod`,
+and its object is one validated API name. The implementation constructs one
+argument-vector subprocess call to `sf sobject describe`; it has no shell, SOQL,
+free-form command, or mutation path. The ledger accepts success only after the
+CLI JSON contains a non-zero, duplicate-free field population.
+
+`salesforce.count` uses the same two-field request and target map. It constructs
+exactly `SELECT COUNT() FROM <validated_object>` and accepts only a completed,
+non-negative integer result. A zero count is valid evidence; a missing, boolean,
+negative, or incomplete result fails the ledger item.
+
+`salesforce.picklist_counts` adds one field API name, live-describes it, and
+continues only when its type is exactly `picklist` and `groupable=true`. It then
+generates one `GROUP BY` query capped at 50 groups. No caller-supplied filter,
+SOQL, limit, or arbitrary text field can reach Salesforce.
+
+`salesforce.query` is the bounded investigation surface. Callers provide only a
+structured object, field list, typed filters, one optional ordering, and a limit
+of at most 200. Atlas live-describes the object, proves that selected, filtered,
+and ordered fields support the requested operations, escapes every literal, and
+then generates the query. Relationship paths, raw SOQL, shell commands,
+encrypted fields, unbounded results, and undeclared response fields fail closed.
+
+`salesforce.metadata_diff` compares the component-name inventory for one fixed,
+supported metadata type across Partial and production. It runs exactly two
+read-only Metadata API list commands and records population counts plus hashes;
+it does not mistake matching names for matching component content.
+
+`salesforce.metadata_content_diff` closes that admitted gap for one exact
+component. It retrieves the component from both orgs into a bounded,
+Atlas-owned artifact directory, excludes transport manifests, hashes every
+source file, and reports content, missing-file, and extra-file differences.
+Wildcards, traversal, arbitrary metadata types, deploy flags, and caller-chosen
+commands cannot reach the subprocess.
+
+`salesforce.apex_test` is the first execution capability and remains Partial
+only. It accepts one to ten exact class API names, proves every class exists in
+the live Partial inventory, runs only those classes with coverage enabled, and
+requires a non-zero, reconciled, passing test summary with a `707` run id.
+
+`salesforce.retrieve_source` is the first GitHub-delivery building block. It
+retrieves one exact component from Partial into a clean, named, linked SFDC
+worktree. The postcondition is a non-zero bounded set of regular files only
+under that project's `force-app/main/default`; deletions, renames, unrelated
+paths, primary/main checkouts, wildcard components, and production are refused.
+
+`salesforce.author_source` consumes that exact retrieve receipt, re-hashes every
+component file, and replaces one receipt-listed path only when its baseline hash
+still matches. It rejects unrelated dirt, traversal, malformed XML, oversized
+content, renamed Apex declarations, and identical replacements. It writes only
+the isolated branch; deployment still requires the governed delivery chain.
+
+`salesforce.create_flow_source` creates one new Flow at a path derived entirely
+from its validated API name. It requires a clean linked worktree, well-formed
+Salesforce Flow XML, and explicit `Active` status, and it refuses existing paths,
+caller-selected paths, other files, or any direct org operation.
+
+`salesforce.verify_flow_activation` walks the complete source-to-commit-to-PR-to-
+merge-to-deploy ledger lineage before querying Partial's Tooling API and requiring
+`ActiveVersion == LatestVersion`. `salesforce.run_created_flow` then executes only
+that activation-proven Atlas-created Flow and asserts one bounded output value.
+Neither capability has a production target.
+
+`salesforce.update_records` accepts 1–10 exact Partial record IDs and structured
+field values. It live-describes the object, validates key prefixes, updateability,
+types, lengths, nullability, encryption, and picklist values, captures the exact
+before-state, applies one REST composite `allOrNone` PATCH, then queries and proves
+the post-state. `salesforce.rollback_update` restores that before-state only when
+the current records still hash to the original verified after-state, preventing a
+rollback from overwriting newer work. Neither action can target production.
+If Salesforce accepts the PATCH but the postcheck is unavailable or mismatched,
+the update becomes blocked with hashed before/intended recovery evidence instead of
+losing its mutation state. `salesforce.reconcile_update` then performs a read-only
+check and proves applied, proves not applied, or remains blocked on concurrent drift;
+an applied reconciliation can use the same guarded rollback path.
+
+`salesforce.create_lwc_source` creates one complete record-page LWC bundle at a
+path derived from its validated API name. The exact five-file contract includes
+JS, HTML, host-scoped SLDS-hook CSS, exposed metadata, and a behavioral Jest test
+that must mount, interact, and assert. It requires a clean linked worktree and
+performs no direct org write; the governed PR and Partial CI chain remains mandatory.
+
+`salesforce.verify_lwc_deployment` walks that source through its exact commit, PR,
+verification, merge, and sandbox-deploy receipts, requires the repository-wide
+`LWC unit tests` gate to be successful, and independently finds exactly one matching
+bundle with a component ID in live Partial metadata. Production is unavailable.
+
+`salesforce.create_report_source` creates one public report in the deterministic
+`unfiled$public` folder. It bounds and validates the report XML root, columns,
+report type, format, scope, and detail mode, requires a clean linked worktree,
+and writes no org directly; delivery still requires the governed Partial CI chain.
+
+`delivery.commit_source` consumes successful source-producing ledger item IDs,
+re-hashes every proven file, requires the complete worktree dirt population to
+equal those files, stages exactly that set, and records the resulting commit SHA.
+It cannot accept caller-supplied paths, stage unrelated work, push, or open a PR.
+
+`delivery.open_pr` consumes only successful commit ledger IDs from one clean
+branch. It fetches `origin/main`, refuses a behind branch, proves every linked
+commit is in HEAD, asserts the governed `ClearspeedRevOps/sfdc` repository,
+pushes that exact branch, and creates or reuses one PR targeting `main`. It does
+not merge, deploy, or infer that CI passed.
+
+`delivery.verify_pr` waits on the actual PR checks, requires the named sandbox
+validation, LWC, and RevOps release gates to exist, rejects every non-green
+non-skipped check, refreshes `origin/main`, and proves both the GitHub base and
+the evidence-linked head are cleanly mergeable on that current base.
+
+`delivery.merge_pr` consumes only that verification receipt, rechecks the head,
+current main, checks, and clean merge state, then squash-merges with GitHub's
+head-SHA lock. `delivery.verify_sandbox_deploy` links the immutable merge SHA to
+exactly one successful `Salesforce CI` push run and its successful
+`Deploy (sandbox)` job. This final receipt is the only capability admitted for
+historical delivery/CI/release coverage; production remains untouched.
+Both pre-merge verification and merge-time re-verification require the production
+validation and deployment checks to exist and be explicitly skipped. The post-merge
+receipt independently requires the production validation and deployment jobs to be
+skipped in the exact push run; a successful production job is a refusal, not green.
