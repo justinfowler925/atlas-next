@@ -41,3 +41,11 @@ LLM. Migration starts with read-only Salesforce inspection, then sandbox writes,
 then delivery handback. Production writes remain out of scope until separately
 authorized and proven.
 
+## Admitted capability: Salesforce describe
+
+`salesforce.describe` is the first vertical slice. Its request has exactly two
+fields (`environment`, `object`), its environment is exactly `partial` or `prod`,
+and its object is one validated API name. The implementation constructs one
+argument-vector subprocess call to `sf sobject describe`; it has no shell, SOQL,
+free-form command, or mutation path. The ledger accepts success only after the
+CLI JSON contains a non-zero, duplicate-free field population.

@@ -77,12 +77,21 @@ class Engine:
         self.execution_enabled = execution_enabled
         self.lease_seconds = lease_seconds
 
-    def run_once(self, *, now: float | None = None) -> RunResult:
+    def run_once(self, *, work_id: str | None = None, now: float | None = None) -> RunResult:
         if not self.execution_enabled:
             return RunResult(claimed=False)
         self.store.expire_leases(now=now)
-        item = self.store.claim_next(
-            self.worker_id, lease_seconds=self.lease_seconds, now=now
+        item = (
+            self.store.claim(
+                work_id,
+                self.worker_id,
+                lease_seconds=self.lease_seconds,
+                now=now,
+            )
+            if work_id is not None
+            else self.store.claim_next(
+                self.worker_id, lease_seconds=self.lease_seconds, now=now
+            )
         )
         if item is None:
             return RunResult(claimed=False)

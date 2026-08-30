@@ -27,9 +27,11 @@ This repository contains the replacement kernel only:
 - truthful health snapshots;
 - tests for the failure classes that made legacy Atlas untrustworthy.
 
-It does **not** contain Salesforce, Linear, GitHub, Slack, deployment, scheduling,
-or LLM adapters yet. The old Atlas remains untouched and is not a runtime
-dependency.
+The first admitted capability is `salesforce.describe`: a hardcoded read-only
+Salesforce CLI call for one object in Partial or production. It accepts no SOQL,
+command string, mutation verb, or arbitrary target. Linear, GitHub, Slack,
+deployment, scheduling, and LLM adapters remain absent. The old Atlas is not a
+runtime dependency.
 
 ## Verify
 
@@ -45,3 +47,9 @@ atlas-next --db /tmp/atlas-next.sqlite init
 atlas-next --db /tmp/atlas-next.sqlite status
 ```
 
+Run the single read-only Salesforce capability explicitly:
+
+```bash
+atlas-next --db /tmp/atlas-next.sqlite salesforce-inspect Account \
+  --environment partial --partial-alias dod-check
+```

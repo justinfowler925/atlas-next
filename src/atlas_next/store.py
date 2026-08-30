@@ -144,6 +144,43 @@ class Store:
             if row is None:
                 return None
             work_id = str(row["id"])
+            self._claim_locked(work_id, worker_id, lease_seconds, timestamp)
+        return self.get(work_id)
+
+    def claim(
+        self,
+        work_id: str,
+        worker_id: str,
+        *,
+        lease_seconds: float = 300,
+        now: float | None = None,
+    ) -> WorkItem:
+        """Claim one explicitly named queued item.
+
+        Operator-invoked capabilities use this instead of accidentally consuming
+        whichever unrelated item happens to be oldest in the queue.
+        """
+        if not worker_id.strip():
+            raise ValueError("worker_id must not be empty")
+        if lease_seconds <= 0:
+            raise ValueError("lease_seconds must be positive")
+        timestamp = time.time() if now is None else now
+        with self._transaction():
+            row = self.db.execute(
+                "SELECT state, available_at FROM work_items WHERE id=?", (work_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(work_id)
+            if row["state"] != WorkState.QUEUED:
+                raise TransitionError(f"{work_id} is not queued")
+            if float(row["available_at"]) > timestamp:
+                raise TransitionError(f"{work_id} is not available yet")
+            self._claim_locked(work_id, worker_id, lease_seconds, timestamp)
+        return self.get(work_id)
+
+    def _claim_locked(
+        self, work_id: str, worker_id: str, lease_seconds: float, timestamp: float
+    ) -> None:
             changed = self.db.execute(
                 """UPDATE work_items
                    SET state='running', attempts=attempts+1, updated_at=?,
@@ -159,7 +196,6 @@ class Store:
                 timestamp,
                 {"worker_id": worker_id, "lease_until": timestamp + lease_seconds},
             )
-        return self.get(work_id)
 
     def succeed(
         self,
@@ -389,4 +425,3 @@ class Store:
             error=row["error"],
             evidence=json.loads(row["evidence_json"]),
         )
-
