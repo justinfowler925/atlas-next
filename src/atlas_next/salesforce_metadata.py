@@ -386,7 +386,9 @@ class SalesforceSourceRetrieve:
                 metadata_type=request.metadata_type,
                 component_name=request.component_name,
             )
-            status = self._git(["git", "status", "--porcelain=v1"]).stdout
+            status = self._git(
+                ["git", "status", "--porcelain=v1", "--untracked-files=all"]
+            ).stdout
             changed = _validate_retrieved_changes(
                 status, git_root, project_prefix, allow_empty=bool(retrieved)
             )

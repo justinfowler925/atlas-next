@@ -277,7 +277,10 @@ class CommitSource:
                 if hashlib.sha256(absolute.read_bytes()).hexdigest() != digest:
                     raise ValueError(f"proven source file changed after production: {path}")
             dirty = _porcelain_paths(
-                self._git(git_root, ["git", "status", "--porcelain=v1"]).stdout
+                self._git(
+                    git_root,
+                    ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+                ).stdout
             )
             if dirty != set(expected):
                 raise ValueError("worktree dirt does not exactly match the proven source files")

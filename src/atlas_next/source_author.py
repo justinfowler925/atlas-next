@@ -149,7 +149,10 @@ class AuthorSource:
                 ):
                     raise ValueError(f"retrieved source changed before authoring: {path}")
             dirty_before = _porcelain_paths(
-                self._git(git_root, ["git", "status", "--porcelain=v1"]).stdout
+                self._git(
+                    git_root,
+                    ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+                ).stdout
             )
             if not dirty_before <= set(receipts):
                 raise ValueError("worktree contains dirt outside the retrieved component")
@@ -159,7 +162,10 @@ class AuthorSource:
             if authored_sha == request.expected_sha256:
                 raise ValueError("authored content is identical to the retrieved source")
             dirty_after = _porcelain_paths(
-                self._git(git_root, ["git", "status", "--porcelain=v1"]).stdout
+                self._git(
+                    git_root,
+                    ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+                ).stdout
             )
             if request.path not in dirty_after or not dirty_after <= set(receipts):
                 raise ValueError("authoring did not produce only the retrieved component dirt")

@@ -58,7 +58,10 @@ def test_author_rehashes_receipt_and_replaces_exact_source_file(tmp_path, source
         def runner(argv, _cwd, _timeout):
             if argv == ["git", "branch", "--show-current"]:
                 return CommandResult(0, "justin-fowler/author\n", "")
-            if argv == ["git", "status", "--porcelain=v1"]:
+            if argv in (
+                ["git", "status", "--porcelain=v1"],
+                ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            ):
                 status = "" if source.read_text() != replacement else f" M {path}\n"
                 return CommandResult(0, status, "")
             raise AssertionError(argv)

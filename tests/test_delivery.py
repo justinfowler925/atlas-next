@@ -82,7 +82,10 @@ def test_commit_stages_exact_evidence_linked_files_and_returns_sha(tmp_path, sou
             commands.append(list(argv))
             if argv == ["git", "branch", "--show-current"]:
                 return CommandResult(0, "justin-fowler/proof\n", "")
-            if argv == ["git", "status", "--porcelain=v1"]:
+            if argv in (
+                ["git", "status", "--porcelain=v1"],
+                ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            ):
                 return CommandResult(0, "" if committed else status, "")
             if argv[:4] == ["git", "diff", "--cached", "--name-only"]:
                 return CommandResult(0, path + "\0", "")
