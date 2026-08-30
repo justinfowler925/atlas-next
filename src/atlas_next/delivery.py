@@ -16,6 +16,7 @@ from .salesforce import CommandResult, _failure_detail
 from .salesforce_metadata import SOURCE_RETRIEVE_ACTION
 from .source_author import AUTHOR_SOURCE_ACTION
 from .flow_source import CREATE_FLOW_SOURCE_ACTION
+from .lwc_source import CREATE_LWC_SOURCE_ACTION
 from .store import Store
 
 
@@ -235,7 +236,12 @@ class CommitSource:
             if any(
                 source.state is not WorkState.SUCCEEDED
                 or source.action
-                not in {SOURCE_RETRIEVE_ACTION, AUTHOR_SOURCE_ACTION, CREATE_FLOW_SOURCE_ACTION}
+                not in {
+                    SOURCE_RETRIEVE_ACTION,
+                    AUTHOR_SOURCE_ACTION,
+                    CREATE_FLOW_SOURCE_ACTION,
+                    CREATE_LWC_SOURCE_ACTION,
+                }
                 for source in sources
                 if source is not None
             ):

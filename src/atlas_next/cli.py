@@ -39,6 +39,7 @@ from .salesforce_metadata import (
 from .store import Store
 from .source_author import AUTHOR_SOURCE_ACTION, AuthorSource
 from .flow_source import CREATE_FLOW_SOURCE_ACTION, CreateFlowSource
+from .lwc_source import CREATE_LWC_SOURCE_ACTION, CreateLwcSource
 from .salesforce_flow import (
     RUN_CREATED_FLOW_ACTION,
     VERIFY_FLOW_ACTIVATION_ACTION,
@@ -186,6 +187,13 @@ def _parser() -> argparse.ArgumentParser:
     rollback.add_argument("--reason", required=True)
     rollback.add_argument("--partial-alias", default="dod-check")
     rollback.add_argument("--artifact-root", type=Path, default=Path(".atlas-next/artifacts"))
+    create_lwc = sub.add_parser(
+        "salesforce-create-lwc-source",
+        help="create one complete record-page LWC bundle with a behavioral Jest test",
+    )
+    create_lwc.add_argument("name")
+    create_lwc.add_argument("--source-dir", type=Path, required=True)
+    create_lwc.add_argument("--project-dir", type=Path, required=True)
     commit = sub.add_parser(
         "commit-source",
         help="commit only files proven by successful source-producing work items",
@@ -410,6 +418,24 @@ def main(argv: list[str] | None = None) -> int:
                     partial_alias=args.partial_alias,
                     artifact_root=args.artifact_root,
                 ),
+            )
+        if args.command == "salesforce-create-lwc-source":
+            filenames = [
+                f"{args.name}.js",
+                f"{args.name}.html",
+                f"{args.name}.css",
+                f"{args.name}.js-meta.xml",
+                f"__tests__/{args.name}.test.js",
+            ]
+            files = {
+                filename: (args.source_dir / filename).read_text(encoding="utf-8")
+                for filename in filenames
+            }
+            return _execute(
+                store,
+                CREATE_LWC_SOURCE_ACTION,
+                {"name": args.name, "files": files},
+                CreateLwcSource(project_dir=args.project_dir),
             )
         if args.command == "commit-source":
             return _execute(

@@ -115,6 +115,12 @@ the post-state. `salesforce.rollback_update` restores that before-state only whe
 the current records still hash to the original verified after-state, preventing a
 rollback from overwriting newer work. Neither action can target production.
 
+`salesforce.create_lwc_source` creates one complete record-page LWC bundle at a
+path derived from its validated API name. The exact five-file contract includes
+JS, HTML, host-scoped SLDS-hook CSS, exposed metadata, and a behavioral Jest test
+that must mount, interact, and assert. It requires a clean linked worktree and
+performs no direct org write; the governed PR and Partial CI chain remains mandatory.
+
 `delivery.commit_source` consumes successful source-producing ledger item IDs,
 re-hashes every proven file, requires the complete worktree dirt population to
 equal those files, stages exactly that set, and records the resulting commit SHA.

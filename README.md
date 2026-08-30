@@ -113,6 +113,9 @@ atlas-next --db /tmp/atlas-next.sqlite salesforce-update-records Account \
   --reason 'Repair approved test record state'
 atlas-next --db /tmp/atlas-next.sqlite salesforce-rollback-update \
   <update-work-id> --reason 'Restore acceptance baseline after proof'
+atlas-next --db /tmp/atlas-next.sqlite salesforce-create-lwc-source \
+  atlasAcceptanceCard --source-dir /path/to/bundle \
+  --project-dir /path/to/isolated-sfdc-worktree/salesforce
 atlas-next --db /tmp/atlas-next.sqlite commit-source <source-work-id> \
   --message 'chore: capture Partial acceptance service'
 atlas-next --db /tmp/atlas-next.sqlite open-pr <commit-work-id> \
