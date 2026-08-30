@@ -121,6 +121,11 @@ JS, HTML, host-scoped SLDS-hook CSS, exposed metadata, and a behavioral Jest tes
 that must mount, interact, and assert. It requires a clean linked worktree and
 performs no direct org write; the governed PR and Partial CI chain remains mandatory.
 
+`salesforce.verify_lwc_deployment` walks that source through its exact commit, PR,
+verification, merge, and sandbox-deploy receipts, requires the repository-wide
+`LWC unit tests` gate to be successful, and independently finds exactly one matching
+bundle with a component ID in live Partial metadata. Production is unavailable.
+
 `delivery.commit_source` consumes successful source-producing ledger item IDs,
 re-hashes every proven file, requires the complete worktree dirt population to
 equal those files, stages exactly that set, and records the resulting commit SHA.

@@ -116,6 +116,8 @@ atlas-next --db /tmp/atlas-next.sqlite salesforce-rollback-update \
 atlas-next --db /tmp/atlas-next.sqlite salesforce-create-lwc-source \
   atlasAcceptanceCard --source-dir /path/to/bundle \
   --project-dir /path/to/isolated-sfdc-worktree/salesforce
+atlas-next --db /tmp/atlas-next.sqlite salesforce-verify-lwc-deployment \
+  <deploy-work-id> <lwc-source-work-id>
 atlas-next --db /tmp/atlas-next.sqlite commit-source <source-work-id> \
   --message 'chore: capture Partial acceptance service'
 atlas-next --db /tmp/atlas-next.sqlite open-pr <commit-work-id> \

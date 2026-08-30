@@ -40,6 +40,7 @@ from .store import Store
 from .source_author import AUTHOR_SOURCE_ACTION, AuthorSource
 from .flow_source import CREATE_FLOW_SOURCE_ACTION, CreateFlowSource
 from .lwc_source import CREATE_LWC_SOURCE_ACTION, CreateLwcSource
+from .salesforce_lwc import VERIFY_LWC_DEPLOYMENT_ACTION, VerifyLwcDeployment
 from .salesforce_flow import (
     RUN_CREATED_FLOW_ACTION,
     VERIFY_FLOW_ACTIVATION_ACTION,
@@ -194,6 +195,13 @@ def _parser() -> argparse.ArgumentParser:
     create_lwc.add_argument("name")
     create_lwc.add_argument("--source-dir", type=Path, required=True)
     create_lwc.add_argument("--project-dir", type=Path, required=True)
+    verify_lwc = sub.add_parser(
+        "salesforce-verify-lwc-deployment",
+        help="prove an Atlas-created LWC passed Jest and exists in live Partial metadata",
+    )
+    verify_lwc.add_argument("deploy_work_id")
+    verify_lwc.add_argument("source_work_id")
+    verify_lwc.add_argument("--partial-alias", default="dod-check")
     commit = sub.add_parser(
         "commit-source",
         help="commit only files proven by successful source-producing work items",
@@ -436,6 +444,16 @@ def main(argv: list[str] | None = None) -> int:
                 CREATE_LWC_SOURCE_ACTION,
                 {"name": args.name, "files": files},
                 CreateLwcSource(project_dir=args.project_dir),
+            )
+        if args.command == "salesforce-verify-lwc-deployment":
+            return _execute(
+                store,
+                VERIFY_LWC_DEPLOYMENT_ACTION,
+                {
+                    "deploy_work_id": args.deploy_work_id,
+                    "source_work_id": args.source_work_id,
+                },
+                VerifyLwcDeployment(store, partial_alias=args.partial_alias),
             )
         if args.command == "commit-source":
             return _execute(
