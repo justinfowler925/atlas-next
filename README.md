@@ -61,7 +61,7 @@ dependency.
 
 Historical coverage is measured against 163 real Salesforce workflows from the
 legacy 200-ticket corpus. See `docs/HISTORICAL_COVERAGE.md`; current strict
-coverage is 20/163 (12.27%), not yet the 80% target.
+coverage is 24/163 (14.72%), not yet the 80% target.
 
 ## Verify
 

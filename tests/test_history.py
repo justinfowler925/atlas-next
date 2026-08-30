@@ -61,6 +61,23 @@ def test_delivery_counts_only_after_governed_sandbox_deploy_receipt():
     assert after["admitted_families"] == ["delivery_ci_release"]
 
 
+def test_apex_counts_only_after_source_authoring_is_admitted():
+    ticket = _ticket("REV-10", "Repair Apex controller", "test class and deploy")
+    before = coverage_report(
+        [ticket], {"salesforce.apex_test", "delivery.verify_sandbox_deploy"}
+    )
+    after = coverage_report(
+        [ticket],
+        {
+            "salesforce.author_source",
+            "salesforce.apex_test",
+            "delivery.verify_sandbox_deploy",
+        },
+    )
+    assert before["covered_ticket_count"] == 0
+    assert after["covered_ticket_count"] == 1
+
+
 def test_history_database_is_opened_read_only(tmp_path):
     database = tmp_path / "history.sqlite"
     connection = sqlite3.connect(database)

@@ -30,7 +30,9 @@ CAPABILITY_FAMILY = {
     "salesforce.metadata_content_diff": "metadata_schema_access",
     # Admitted only at the end of the evidence-linked commit -> PR -> CI -> Partial chain.
     "delivery.verify_sandbox_deploy": "delivery_ci_release",
-    # A test runner is necessary evidence for Apex work, but cannot author or repair Apex.
+    # Admitted for Apex only after hash-locked authoring, governed delivery, and live tests.
+    "salesforce.author_source": "apex_logic_tests",
+    # A test runner alone is necessary evidence for Apex work, but cannot author or repair it.
     "salesforce.apex_test": None,
 }
 
