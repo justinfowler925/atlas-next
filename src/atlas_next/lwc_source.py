@@ -82,6 +82,7 @@ class CreateLwcSource:
         self.timeout_seconds = timeout_seconds
 
     def __call__(self, item: WorkItem) -> Outcome:
+        created_paths: list[tuple[Path, bytes]] = []
         try:
             request = CreateLwcSourceRequest.from_payload(item.payload)
             if not (self.project_dir / "sfdx-project.json").is_file():
@@ -118,8 +119,11 @@ class CreateLwcSource:
                     raise ValueError("LWC source path already exists or escaped the worktree")
                 absolute.parent.mkdir(parents=True, exist_ok=True)
                 absolute.write_text(content, encoding="utf-8")
+                created_paths.append((absolute, content.encode("utf-8")))
                 paths[relative] = absolute
-            status = self._git(["git", "status", "--porcelain=v1"]).stdout
+            status = self._git(
+                ["git", "status", "--porcelain=v1", "--untracked-files=all"]
+            ).stdout
             dirty = {line[3:] for line in status.splitlines() if line.startswith("?? ")}
             if dirty != set(paths) or len(status.splitlines()) != len(paths):
                 raise ValueError("LWC creation did not produce exactly the expected bundle files")
@@ -132,6 +136,7 @@ class CreateLwcSource:
                 for relative, absolute in sorted(paths.items())
             ]
         except (ValueError, OSError, subprocess.SubprocessError, ET.ParseError) as exc:
+            _remove_unchanged_created_files(created_paths)
             return Outcome.failed(f"Salesforce LWC source creation refused: {exc}")
 
         result = {
@@ -190,3 +195,20 @@ def _validate_lwc_files(name: str, files: dict[str, str]) -> None:
     required_test_markers = ("createElement", "document.body.appendChild", ".click()", "expect(")
     if any(marker not in test for marker in required_test_markers):
         raise ValueError("LWC Jest file must mount, interact with, and assert the component")
+
+
+def _remove_unchanged_created_files(created: list[tuple[Path, bytes]]) -> None:
+    """Clean only bytes written by this failed action; preserve concurrent edits."""
+    parents = set()
+    for path, expected in reversed(created):
+        try:
+            if path.is_file() and not path.is_symlink() and path.read_bytes() == expected:
+                path.unlink()
+                parents.add(path.parent)
+        except OSError:
+            continue
+    for parent in sorted(parents, key=lambda value: len(value.parts), reverse=True):
+        try:
+            parent.rmdir()
+        except OSError:
+            continue

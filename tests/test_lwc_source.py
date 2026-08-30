@@ -45,7 +45,10 @@ def test_lwc_creation_writes_only_complete_derived_bundle(tmp_path):
             return CommandResult(0, str(tmp_path / "repo/.git/worktrees/lwc"), "")
         if argv[:2] == ["git", "rev-parse"] and argv[-1] == "--git-common-dir":
             return CommandResult(0, str(tmp_path / "repo/.git"), "")
-        if argv == ["git", "status", "--porcelain=v1"]:
+        if argv in (
+            ["git", "status", "--porcelain=v1"],
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+        ):
             rows = []
             for filename in FILES:
                 path = f"{bundle}/{filename}"
@@ -70,3 +73,37 @@ def test_lwc_creation_writes_only_complete_derived_bundle(tmp_path):
     assert next(row for row in completed.result["files"] if row["path"].endswith(".css"))[
         "sha256"
     ] == hashlib.sha256(css.read_bytes()).hexdigest()
+
+
+def test_lwc_creation_cleans_only_action_written_bytes_after_failed_postcondition(tmp_path):
+    git_root = tmp_path / "worktree"
+    project = git_root / "salesforce"
+    project.mkdir(parents=True)
+    (project / "sfdx-project.json").write_text("{}")
+
+    def runner(argv, _cwd, _timeout):
+        if argv[:2] == ["git", "rev-parse"] and argv[-1] == "--show-toplevel":
+            return CommandResult(0, str(git_root), "")
+        if argv == ["git", "branch", "--show-current"]:
+            return CommandResult(0, "feature\n", "")
+        if argv[:2] == ["git", "rev-parse"] and argv[-1] == "--git-dir":
+            return CommandResult(0, str(tmp_path / "repo/.git/worktrees/lwc"), "")
+        if argv[:2] == ["git", "rev-parse"] and argv[-1] == "--git-common-dir":
+            return CommandResult(0, str(tmp_path / "repo/.git"), "")
+        if argv == ["git", "status", "--porcelain=v1"]:
+            return CommandResult(0, "", "")
+        if argv == ["git", "status", "--porcelain=v1", "--untracked-files=all"]:
+            return CommandResult(0, "?? wrong-path\n", "")
+        raise AssertionError(argv)
+
+    with Store(tmp_path / "state.sqlite3") as store:
+        item = store.enqueue(CREATE_LWC_SOURCE_ACTION, {"name": NAME, "files": FILES})
+        completed = Engine(
+            store,
+            {CREATE_LWC_SOURCE_ACTION: CreateLwcSource(project_dir=project, runner=runner)},
+            worker_id="test",
+            execution_enabled=True,
+        ).run_once(work_id=item.id).item
+
+    assert completed is not None and completed.state is WorkState.FAILED
+    assert not (project / "force-app/main/default/lwc" / NAME).exists()
