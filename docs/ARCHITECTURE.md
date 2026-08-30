@@ -100,3 +100,8 @@ branch. It fetches `origin/main`, refuses a behind branch, proves every linked
 commit is in HEAD, asserts the governed `ClearspeedRevOps/sfdc` repository,
 pushes that exact branch, and creates or reuses one PR targeting `main`. It does
 not merge, deploy, or infer that CI passed.
+
+`delivery.verify_pr` waits on the actual PR checks, requires the named sandbox
+validation, LWC, and RevOps release gates to exist, rejects every non-green
+non-skipped check, refreshes `origin/main`, and proves both the GitHub base and
+the evidence-linked head are cleanly mergeable on that current base.

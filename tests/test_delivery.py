@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 import pytest
 
@@ -8,10 +9,13 @@ from atlas_next import Engine, Store, WorkState
 from atlas_next.delivery import (
     COMMIT_SOURCE_ACTION,
     OPEN_PR_ACTION,
+    VERIFY_PR_ACTION,
     CommitSource,
     CommitSourceRequest,
     OpenPr,
     OpenPullRequest,
+    VerifyPr,
+    _parse_checks,
 )
 from atlas_next.salesforce import CommandResult
 from atlas_next.salesforce_metadata import SOURCE_RETRIEVE_ACTION
@@ -250,3 +254,76 @@ def test_open_pr_refuses_branch_behind_current_main_before_push(tmp_path):
     assert pushed is False
     assert completed is not None and completed.state is WorkState.FAILED
     assert "behind current origin/main" in (completed.error or "")
+
+
+def test_verify_pr_waits_for_named_checks_and_proves_current_main(tmp_path):
+    git_root = tmp_path / "worktree"
+    git_root.mkdir()
+    head = "a" * 40
+    base = "b" * 40
+    checks = [
+        {"name": "Validate (sandbox)", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {"name": "LWC unit tests", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {
+            "name": "PM Tracker + revops-dash verify",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+        },
+        {"name": "Deploy (production)", "status": "COMPLETED", "conclusion": "SKIPPED"},
+    ]
+    pr = {
+        "number": 999,
+        "url": "https://github.com/ClearspeedRevOps/sfdc/pull/999",
+        "state": "OPEN",
+        "isDraft": False,
+        "mergeStateStatus": "CLEAN",
+        "headRefOid": head,
+        "baseRefOid": base,
+        "statusCheckRollup": checks,
+    }
+    commands = []
+    with Store(tmp_path / "state.sqlite3") as store:
+        opened = store.enqueue(OPEN_PR_ACTION, {})
+        assert store.claim(opened.id, "opener") is not None
+        store.succeed(
+            opened.id,
+            "opener",
+            result={"git_root": str(git_root), "pr_number": 999, "head_sha": head},
+            evidence=[{"kind": OPEN_PR_ACTION}],
+        )
+
+        def runner(argv, _cwd, _timeout):
+            commands.append(list(argv))
+            if argv[:3] == ["gh", "pr", "view"]:
+                return CommandResult(0, json.dumps(pr), "")
+            if argv == ["git", "rev-parse", "origin/main"]:
+                return CommandResult(0, base, "")
+            return CommandResult(0, "green", "")
+
+        item = store.enqueue(VERIFY_PR_ACTION, {"open_pr_work_id": opened.id})
+        completed = Engine(
+            store,
+            {VERIFY_PR_ACTION: VerifyPr(store, runner=runner)},
+            worker_id="test",
+            execution_enabled=True,
+        ).run_once(work_id=item.id).item
+
+    assert ["gh", "pr", "checks", "999", "--watch", "--interval", "10"] in commands
+    assert completed is not None and completed.state is WorkState.SUCCEEDED
+    assert completed.result["check_count"] == 4
+    assert completed.evidence[0]["sandbox_validation"] == "SUCCESS"
+    assert completed.evidence[0]["merge_state"] == "CLEAN"
+
+
+def test_parse_checks_rejects_pending_duplicate_or_zero_population():
+    with pytest.raises(ValueError, match="no status checks"):
+        _parse_checks([])
+    with pytest.raises(ValueError, match="incomplete"):
+        _parse_checks([{"name": "Validate (sandbox)", "status": "IN_PROGRESS", "conclusion": ""}])
+    with pytest.raises(ValueError, match="duplicate"):
+        _parse_checks(
+            [
+                {"name": "same", "status": "COMPLETED", "conclusion": "SUCCESS"},
+                {"name": "same", "status": "COMPLETED", "conclusion": "SUCCESS"},
+            ]
+        )

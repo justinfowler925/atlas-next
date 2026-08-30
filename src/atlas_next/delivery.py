@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 from collections.abc import Callable, Sequence
@@ -18,6 +19,7 @@ from .store import Store
 
 COMMIT_SOURCE_ACTION = "delivery.commit_source"
 OPEN_PR_ACTION = "delivery.open_pr"
+VERIFY_PR_ACTION = "delivery.verify_pr"
 _MESSAGE_RE = re.compile(r"^(feat|fix|chore|test|docs|refactor): [^\r\n]{3,100}$")
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -88,19 +90,76 @@ class OpenPullRequest:
         return cls(ids, title, body)
 
 
+@dataclass(frozen=True)
+class VerifyPullRequest:
+    open_pr_work_id: str
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> VerifyPullRequest:
+        if set(payload) != {"open_pr_work_id"}:
+            unexpected = sorted(set(payload) - {"open_pr_work_id"})
+            missing = sorted({"open_pr_work_id"} - set(payload))
+            details = []
+            if missing:
+                details.append("missing keys: open_pr_work_id")
+            if unexpected:
+                details.append(f"unexpected keys: {', '.join(unexpected)}")
+            raise ValueError("invalid delivery.verify_pr payload (" + "; ".join(details) + ")")
+        value = payload["open_pr_work_id"]
+        if not isinstance(value, str) or not value:
+            raise ValueError("open_pr_work_id must be non-empty text")
+        return cls(value)
+
+
 ProjectRunner = Callable[[Sequence[str], Path, float], CommandResult]
 
 
 def run_project_command(argv: Sequence[str], cwd: Path, timeout_seconds: float) -> CommandResult:
+    environment = None
+    if argv and (argv[0] == "gh" or list(argv[:2]) in (["git", "fetch"], ["git", "push"])):
+        environment = _github_environment(cwd)
     completed = subprocess.run(
         list(argv),
         cwd=cwd,
+        env=environment,
         capture_output=True,
         text=True,
         timeout=timeout_seconds,
         check=False,
     )
     return CommandResult(completed.returncode, completed.stdout, completed.stderr)
+
+
+def _github_environment(cwd: Path) -> dict[str, str]:
+    """Resolve GitHub identity for the target repo, never the caller shell."""
+    mapping = Path.home() / ".config/zsh/gh-owner-map.sh"
+    if not mapping.is_file():
+        raise ValueError("target-owner GitHub mapping is unavailable")
+    clean_environment = os.environ.copy()
+    clean_environment.pop("GH_TOKEN", None)
+    clean_environment.pop("GITHUB_TOKEN", None)
+    resolved = subprocess.run(
+        [
+            "/bin/sh",
+            "-c",
+            '. "$1"; gh_token_for_dir "$2"',
+            "atlas-next-github-auth",
+            str(mapping),
+            str(cwd),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+        env=clean_environment,
+    )
+    token = resolved.stdout.strip()
+    if resolved.returncode != 0 or not token:
+        detail = resolved.stderr.strip()[:300] or "target owner has no mapped GitHub token"
+        raise ValueError(f"target-owner GitHub auth failed: {detail}")
+    clean_environment["GH_TOKEN"] = token
+    clean_environment["GITHUB_TOKEN"] = token
+    return clean_environment
 
 
 class CommitSource:
@@ -347,6 +406,116 @@ class OpenPr:
         return completed
 
 
+class VerifyPr:
+    """Wait for all PR checks and prove current-main merge readiness."""
+
+    def __init__(
+        self,
+        store: Store,
+        *,
+        runner: ProjectRunner = run_project_command,
+        timeout_seconds: float = 1800,
+    ) -> None:
+        self.store = store
+        self.runner = runner
+        self.timeout_seconds = timeout_seconds
+
+    def __call__(self, item: WorkItem) -> Outcome:
+        try:
+            request = VerifyPullRequest.from_payload(item.payload)
+            opened = self.store.get(request.open_pr_work_id)
+            if opened is None or opened.state is not WorkState.SUCCEEDED:
+                raise ValueError("open PR work item is missing or unsuccessful")
+            if opened.action != OPEN_PR_ACTION:
+                raise ValueError("referenced work item is not an open PR receipt")
+            git_root = Path(str(opened.result.get("git_root", ""))).resolve()
+            number = opened.result.get("pr_number")
+            expected_head = str(opened.result.get("head_sha", ""))
+            if (
+                not git_root.is_dir()
+                or isinstance(number, bool)
+                or not isinstance(number, int)
+                or not _SHA_RE.fullmatch(expected_head)
+            ):
+                raise ValueError("open PR receipt is incomplete")
+            watched = self.runner(
+                ["gh", "pr", "checks", str(number), "--watch", "--interval", "10"],
+                git_root,
+                self.timeout_seconds,
+            )
+            if watched.returncode != 0:
+                raise ValueError(f"PR checks failed: {_failure_detail(watched)}")
+            raw = self._run(
+                git_root,
+                [
+                    "gh", "pr", "view", str(number),
+                    "--json", "number,url,state,isDraft,mergeStateStatus,headRefOid,baseRefOid,statusCheckRollup",
+                ],
+            ).stdout
+            pr = json.loads(raw)
+            if pr.get("state") != "OPEN" or pr.get("isDraft") is not False:
+                raise ValueError("PR is not an open non-draft pull request")
+            if pr.get("headRefOid") != expected_head:
+                raise ValueError("PR head changed after the evidence-linked push")
+            checks = _parse_checks(pr.get("statusCheckRollup"))
+            required = {"Validate (sandbox)", "LWC unit tests", "PM Tracker + revops-dash verify"}
+            missing = sorted(required - set(checks))
+            if missing:
+                raise ValueError(f"required checks were not created: {', '.join(missing)}")
+            bad = sorted(name for name, conclusion in checks.items() if conclusion not in {"SUCCESS", "NEUTRAL", "SKIPPED"})
+            if bad:
+                raise ValueError(f"checks are not green: {', '.join(bad)}")
+            if checks["Validate (sandbox)"] != "SUCCESS":
+                raise ValueError("Validate (sandbox) did not succeed")
+            self._run(git_root, ["git", "fetch", "origin", "main"])
+            current_main = self._run(git_root, ["git", "rev-parse", "origin/main"]).stdout.strip()
+            if pr.get("baseRefOid") != current_main:
+                raise ValueError("PR base receipt is not current origin/main")
+            contains = self.runner(
+                ["git", "merge-base", "--is-ancestor", current_main, expected_head],
+                git_root,
+                self.timeout_seconds,
+            )
+            if contains.returncode != 0 or pr.get("mergeStateStatus") != "CLEAN":
+                raise ValueError("PR is not cleanly mergeable on current main")
+        except (ValueError, OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+            return Outcome.failed(f"verify PR refused: {exc}")
+
+        result = {
+            "git_root": str(git_root),
+            "pr_number": number,
+            "pr_url": pr["url"],
+            "head_sha": expected_head,
+            "base_sha": current_main,
+            "checks": checks,
+            "check_count": len(checks),
+            "merge_state": "CLEAN",
+            "open_pr_work_id": request.open_pr_work_id,
+        }
+        evidence = [
+            {
+                "kind": VERIFY_PR_ACTION,
+                "repository": "ClearspeedRevOps/sfdc",
+                "pr_number": number,
+                "pr_url": pr["url"],
+                "head_sha": expected_head,
+                "base_sha": current_main,
+                "check_count": len(checks),
+                "sandbox_validation": "SUCCESS",
+                "contains_current_main": True,
+                "merge_state": "CLEAN",
+                "merged": False,
+            }
+        ]
+        return Outcome.success(result, evidence)
+
+    def _run(self, cwd: Path, argv: Sequence[str]) -> CommandResult:
+        completed = self.runner(argv, cwd, self.timeout_seconds)
+        if completed.returncode != 0:
+            raise ValueError(f"PR verification command failed: {_failure_detail(completed)}")
+        return completed
+
+
 def _porcelain_paths(status: str) -> set[str]:
     paths = set()
     for line in status.splitlines():
@@ -356,3 +525,21 @@ def _porcelain_paths(status: str) -> set[str]:
             raise ValueError("git status contains an unsupported path shape")
         paths.add(line[3:])
     return paths
+
+
+def _parse_checks(value: Any) -> dict[str, str]:
+    if not isinstance(value, list) or not value:
+        raise ValueError("PR has no status checks")
+    checks = {}
+    for row in value:
+        if not isinstance(row, dict):
+            raise ValueError("PR status check is not an object")
+        name = row.get("name") or row.get("context")
+        status = row.get("status")
+        conclusion = row.get("conclusion")
+        if not isinstance(name, str) or not name or name in checks:
+            raise ValueError("PR status checks contain an invalid or duplicate name")
+        if status != "COMPLETED" or not isinstance(conclusion, str) or not conclusion:
+            raise ValueError(f"PR status check is incomplete: {name}")
+        checks[name] = conclusion
+    return checks

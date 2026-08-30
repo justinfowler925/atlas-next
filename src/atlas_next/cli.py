@@ -4,7 +4,14 @@ import argparse
 import json
 from pathlib import Path
 
-from .delivery import COMMIT_SOURCE_ACTION, OPEN_PR_ACTION, CommitSource, OpenPr
+from .delivery import (
+    COMMIT_SOURCE_ACTION,
+    OPEN_PR_ACTION,
+    VERIFY_PR_ACTION,
+    CommitSource,
+    OpenPr,
+    VerifyPr,
+)
 from .health import snapshot
 from .engine import Engine, Handler
 from .salesforce import (
@@ -124,6 +131,11 @@ def _parser() -> argparse.ArgumentParser:
     open_pr.add_argument("commit_work_ids", nargs="+")
     open_pr.add_argument("--title", required=True)
     open_pr.add_argument("--body", required=True)
+    verify_pr = sub.add_parser(
+        "verify-pr",
+        help="wait for required PR checks and prove current-main merge readiness",
+    )
+    verify_pr.add_argument("open_pr_work_id")
     return parser
 
 
@@ -269,6 +281,13 @@ def main(argv: list[str] | None = None) -> int:
                     "body": args.body,
                 },
                 OpenPr(store),
+            )
+        if args.command == "verify-pr":
+            return _execute(
+                store,
+                VERIFY_PR_ACTION,
+                {"open_pr_work_id": args.open_pr_work_id},
+                VerifyPr(store),
             )
         report = snapshot(
             store,

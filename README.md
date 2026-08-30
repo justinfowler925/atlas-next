@@ -51,6 +51,8 @@ Commit source stages and commits only files whose current hashes match successfu
 source-producing ledger evidence; it rejects unrelated dirt and does not push.
 Open PR accepts only successful commit work-item IDs, proves their branch contains
 current `origin/main`, pushes that exact HEAD, and targets `ClearspeedRevOps/sfdc`.
+Verify PR waits for GitHub checks, requires the sandbox validation and sibling
+gates to exist and finish green, and re-proves that HEAD contains current main.
 Linear, GitHub, Slack,
 deployment, scheduling, and LLM adapters remain absent. The old Atlas is not a
 runtime dependency.
@@ -99,4 +101,5 @@ atlas-next --db /tmp/atlas-next.sqlite commit-source <source-work-id> \
 atlas-next --db /tmp/atlas-next.sqlite open-pr <commit-work-id> \
   --title 'Capture Partial acceptance service' \
   --body 'Exact Partial retrieval with independent hashes and named Apex tests.'
+atlas-next --db /tmp/atlas-next.sqlite verify-pr <open-pr-work-id>
 ```
