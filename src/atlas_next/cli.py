@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from .delivery import COMMIT_SOURCE_ACTION, OPEN_PR_ACTION, CommitSource, OpenPr
 from .health import snapshot
 from .engine import Engine, Handler
 from .salesforce import (
@@ -110,6 +111,19 @@ def _parser() -> argparse.ArgumentParser:
     retrieve.add_argument("name")
     retrieve.add_argument("--partial-alias", default="dod-check")
     retrieve.add_argument("--project-dir", type=Path, required=True)
+    commit = sub.add_parser(
+        "commit-source",
+        help="commit only files proven by successful source-producing work items",
+    )
+    commit.add_argument("source_work_ids", nargs="+")
+    commit.add_argument("--message", required=True)
+    open_pr = sub.add_parser(
+        "open-pr",
+        help="push evidence-linked commits and open one current-main SFDC pull request",
+    )
+    open_pr.add_argument("commit_work_ids", nargs="+")
+    open_pr.add_argument("--title", required=True)
+    open_pr.add_argument("--body", required=True)
     return parser
 
 
@@ -237,6 +251,24 @@ def main(argv: list[str] | None = None) -> int:
                     partial_alias=args.partial_alias,
                     project_dir=args.project_dir,
                 ),
+            )
+        if args.command == "commit-source":
+            return _execute(
+                store,
+                COMMIT_SOURCE_ACTION,
+                {"source_work_ids": args.source_work_ids, "message": args.message},
+                CommitSource(store),
+            )
+        if args.command == "open-pr":
+            return _execute(
+                store,
+                OPEN_PR_ACTION,
+                {
+                    "commit_work_ids": args.commit_work_ids,
+                    "title": args.title,
+                    "body": args.body,
+                },
+                OpenPr(store),
             )
         report = snapshot(
             store,

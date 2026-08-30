@@ -1,0 +1,358 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import subprocess
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from .engine import Outcome
+from .models import WorkItem, WorkState
+from .salesforce import CommandResult, _failure_detail
+from .salesforce_metadata import SOURCE_RETRIEVE_ACTION
+from .store import Store
+
+
+COMMIT_SOURCE_ACTION = "delivery.commit_source"
+OPEN_PR_ACTION = "delivery.open_pr"
+_MESSAGE_RE = re.compile(r"^(feat|fix|chore|test|docs|refactor): [^\r\n]{3,100}$")
+_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+@dataclass(frozen=True)
+class CommitSourceRequest:
+    source_work_ids: tuple[str, ...]
+    message: str
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> CommitSourceRequest:
+        if set(payload) != {"source_work_ids", "message"}:
+            unexpected = sorted(set(payload) - {"source_work_ids", "message"})
+            missing = sorted({"source_work_ids", "message"} - set(payload))
+            details = []
+            if missing:
+                details.append(f"missing keys: {', '.join(missing)}")
+            if unexpected:
+                details.append(f"unexpected keys: {', '.join(unexpected)}")
+            raise ValueError(
+                "invalid delivery.commit_source payload (" + "; ".join(details) + ")"
+            )
+        raw_ids = payload["source_work_ids"]
+        if not isinstance(raw_ids, list) or not 1 <= len(raw_ids) <= 20:
+            raise ValueError("source_work_ids must contain 1 to 20 work item ids")
+        ids = tuple(raw_ids)
+        if any(not isinstance(value, str) or not value for value in ids):
+            raise ValueError("every source work id must be non-empty text")
+        if len(ids) != len(set(ids)):
+            raise ValueError("source_work_ids must not contain duplicates")
+        message = payload["message"]
+        if not isinstance(message, str) or not _MESSAGE_RE.fullmatch(message):
+            raise ValueError("message must be one single-line conventional commit subject")
+        return cls(ids, message)
+
+
+@dataclass(frozen=True)
+class OpenPullRequest:
+    commit_work_ids: tuple[str, ...]
+    title: str
+    body: str
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> OpenPullRequest:
+        if set(payload) != {"commit_work_ids", "title", "body"}:
+            unexpected = sorted(set(payload) - {"commit_work_ids", "title", "body"})
+            missing = sorted({"commit_work_ids", "title", "body"} - set(payload))
+            details = []
+            if missing:
+                details.append(f"missing keys: {', '.join(missing)}")
+            if unexpected:
+                details.append(f"unexpected keys: {', '.join(unexpected)}")
+            raise ValueError("invalid delivery.open_pr payload (" + "; ".join(details) + ")")
+        raw_ids = payload["commit_work_ids"]
+        if not isinstance(raw_ids, list) or not 1 <= len(raw_ids) <= 20:
+            raise ValueError("commit_work_ids must contain 1 to 20 work item ids")
+        ids = tuple(raw_ids)
+        if any(not isinstance(value, str) or not value for value in ids):
+            raise ValueError("every commit work id must be non-empty text")
+        if len(ids) != len(set(ids)):
+            raise ValueError("commit_work_ids must not contain duplicates")
+        title = payload["title"]
+        body = payload["body"]
+        if not isinstance(title, str) or not 10 <= len(title) <= 120 or "\n" in title:
+            raise ValueError("title must be one line containing 10 to 120 characters")
+        if not isinstance(body, str) or not 20 <= len(body) <= 5000:
+            raise ValueError("body must contain 20 to 5000 characters")
+        return cls(ids, title, body)
+
+
+ProjectRunner = Callable[[Sequence[str], Path, float], CommandResult]
+
+
+def run_project_command(argv: Sequence[str], cwd: Path, timeout_seconds: float) -> CommandResult:
+    completed = subprocess.run(
+        list(argv),
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=timeout_seconds,
+        check=False,
+    )
+    return CommandResult(completed.returncode, completed.stdout, completed.stderr)
+
+
+class CommitSource:
+    """Commit only files proven by successful source-producing ledger items."""
+
+    def __init__(
+        self,
+        store: Store,
+        *,
+        runner: ProjectRunner = run_project_command,
+        timeout_seconds: float = 120,
+    ) -> None:
+        self.store = store
+        self.runner = runner
+        self.timeout_seconds = timeout_seconds
+
+    def __call__(self, item: WorkItem) -> Outcome:
+        try:
+            request = CommitSourceRequest.from_payload(item.payload)
+            sources = [self.store.get(source_id) for source_id in request.source_work_ids]
+            if any(source is None for source in sources):
+                raise ValueError("one or more source work items do not exist")
+            if any(
+                source.state is not WorkState.SUCCEEDED or source.action != SOURCE_RETRIEVE_ACTION
+                for source in sources
+                if source is not None
+            ):
+                raise ValueError("every source work item must be a successful source producer")
+            roots = {str(source.result.get("git_root", "")) for source in sources if source}
+            branches = {str(source.result.get("branch", "")) for source in sources if source}
+            if len(roots) != 1 or len(branches) != 1:
+                raise ValueError("all source work items must target the same git root and branch")
+            git_root = Path(roots.pop()).resolve()
+            branch = branches.pop()
+            if not git_root.is_dir() or not branch or branch in {"main", "master"}:
+                raise ValueError("source work items do not identify a valid non-main worktree")
+            current_branch = self._git(git_root, ["git", "branch", "--show-current"]).stdout.strip()
+            if current_branch != branch:
+                raise ValueError("worktree branch changed after source production")
+            expected = {}
+            for source in sources:
+                assert source is not None
+                for file in source.result.get("files", []):
+                    path = file.get("path")
+                    digest = file.get("sha256")
+                    if not isinstance(path, str) or not isinstance(digest, str):
+                        raise ValueError("source evidence contains an invalid file receipt")
+                    if path in expected and expected[path] != digest:
+                        raise ValueError("source evidence disagrees about a file hash")
+                    expected[path] = digest
+            if not expected:
+                raise ValueError("source work items prove zero files")
+            for path, digest in expected.items():
+                absolute = (git_root / path).resolve()
+                if not absolute.is_relative_to(git_root) or not absolute.is_file():
+                    raise ValueError(f"proven source file is missing: {path}")
+                if hashlib.sha256(absolute.read_bytes()).hexdigest() != digest:
+                    raise ValueError(f"proven source file changed after production: {path}")
+            dirty = _porcelain_paths(
+                self._git(git_root, ["git", "status", "--porcelain=v1"]).stdout
+            )
+            if dirty != set(expected):
+                raise ValueError("worktree dirt does not exactly match the proven source files")
+            self._git(git_root, ["git", "add", "--", *sorted(expected)])
+            staged = self._git(
+                git_root, ["git", "diff", "--cached", "--name-only", "-z"]
+            ).stdout.split("\0")
+            if {path for path in staged if path} != set(expected):
+                raise ValueError("staged files do not exactly match the proven source files")
+            self._git(git_root, ["git", "commit", "-m", request.message])
+            sha = self._git(git_root, ["git", "rev-parse", "HEAD"]).stdout.strip()
+            if not _SHA_RE.fullmatch(sha):
+                raise ValueError("git commit produced no valid SHA")
+            if self._git(git_root, ["git", "status", "--porcelain=v1"]).stdout:
+                raise ValueError("worktree is dirty after commit")
+        except (ValueError, OSError, subprocess.SubprocessError) as exc:
+            return Outcome.failed(f"source commit refused: {exc}")
+
+        result = {
+            "git_root": str(git_root),
+            "branch": branch,
+            "commit_sha": sha,
+            "message": request.message,
+            "files": sorted(expected),
+            "file_count": len(expected),
+            "source_work_ids": list(request.source_work_ids),
+        }
+        evidence = [
+            {
+                "kind": COMMIT_SOURCE_ACTION,
+                "git_root": str(git_root),
+                "branch": branch,
+                "commit_sha": sha,
+                "file_count": len(expected),
+                "source_work_ids": list(request.source_work_ids),
+                "clean_after_commit": True,
+                "pushed": False,
+            }
+        ]
+        return Outcome.success(result, evidence)
+
+    def _git(self, cwd: Path, argv: Sequence[str]) -> CommandResult:
+        completed = self.runner(argv, cwd, self.timeout_seconds)
+        if completed.returncode != 0:
+            raise ValueError(f"git command failed: {_failure_detail(completed)}")
+        return completed
+
+
+class OpenPr:
+    """Push evidence-linked commits and open one PR against current main."""
+
+    def __init__(
+        self,
+        store: Store,
+        *,
+        runner: ProjectRunner = run_project_command,
+        timeout_seconds: float = 180,
+    ) -> None:
+        self.store = store
+        self.runner = runner
+        self.timeout_seconds = timeout_seconds
+
+    def __call__(self, item: WorkItem) -> Outcome:
+        try:
+            request = OpenPullRequest.from_payload(item.payload)
+            commits = [self.store.get(work_id) for work_id in request.commit_work_ids]
+            if any(commit is None for commit in commits):
+                raise ValueError("one or more commit work items do not exist")
+            if any(
+                commit.state is not WorkState.SUCCEEDED or commit.action != COMMIT_SOURCE_ACTION
+                for commit in commits
+                if commit is not None
+            ):
+                raise ValueError("every commit work item must be a successful source commit")
+            roots = {str(commit.result.get("git_root", "")) for commit in commits if commit}
+            branches = {str(commit.result.get("branch", "")) for commit in commits if commit}
+            if len(roots) != 1 or len(branches) != 1:
+                raise ValueError("all commits must belong to the same git root and branch")
+            git_root = Path(roots.pop()).resolve()
+            branch = branches.pop()
+            if not git_root.is_dir() or branch in {"main", "master"}:
+                raise ValueError("commit evidence does not identify a non-main worktree")
+            if self._run(git_root, ["git", "branch", "--show-current"]).stdout.strip() != branch:
+                raise ValueError("worktree branch changed after commit")
+            if self._run(git_root, ["git", "status", "--porcelain=v1"]).stdout:
+                raise ValueError("worktree must be clean before push")
+            head = self._run(git_root, ["git", "rev-parse", "HEAD"]).stdout.strip()
+            if not _SHA_RE.fullmatch(head):
+                raise ValueError("worktree has no valid HEAD SHA")
+            for commit in commits:
+                assert commit is not None
+                sha = str(commit.result.get("commit_sha", ""))
+                if not _SHA_RE.fullmatch(sha):
+                    raise ValueError("commit evidence contains an invalid SHA")
+                ancestor = self.runner(
+                    ["git", "merge-base", "--is-ancestor", sha, head],
+                    git_root,
+                    self.timeout_seconds,
+                )
+                if ancestor.returncode != 0:
+                    raise ValueError("an evidence-linked commit is not an ancestor of HEAD")
+            self._run(git_root, ["git", "fetch", "origin", "main"])
+            current_main = self._run(git_root, ["git", "rev-parse", "origin/main"]).stdout.strip()
+            contains_main = self.runner(
+                ["git", "merge-base", "--is-ancestor", current_main, head],
+                git_root,
+                self.timeout_seconds,
+            )
+            if contains_main.returncode != 0:
+                raise ValueError("branch is behind current origin/main")
+            ahead = self._run(
+                git_root, ["git", "rev-list", "--count", "origin/main..HEAD"]
+            ).stdout.strip()
+            if not ahead.isdigit() or int(ahead) < 1:
+                raise ValueError("branch has zero commits ahead of current main")
+            owner = self._run(
+                git_root, ["gh", "repo", "view", "--json", "nameWithOwner"]
+            ).stdout
+            if json.loads(owner).get("nameWithOwner") != "ClearspeedRevOps/sfdc":
+                raise ValueError("git root is not the governed ClearspeedRevOps/sfdc repository")
+            self._run(git_root, ["git", "push", "-u", "origin", f"HEAD:refs/heads/{branch}"])
+            existing_raw = self._run(
+                git_root,
+                [
+                    "gh", "pr", "list", "--head", branch, "--base", "main", "--state", "open",
+                    "--json", "number,url,headRefOid,title",
+                ],
+            ).stdout
+            existing = json.loads(existing_raw)
+            if not isinstance(existing, list) or len(existing) > 1:
+                raise ValueError("GitHub returned an invalid open PR population")
+            if existing:
+                pr = existing[0]
+            else:
+                url = self._run(
+                    git_root,
+                    [
+                        "gh", "pr", "create", "--base", "main", "--head", branch,
+                        "--title", request.title, "--body", request.body,
+                    ],
+                ).stdout.strip()
+                match = re.fullmatch(r"https://github\.com/ClearspeedRevOps/sfdc/pull/(\d+)", url)
+                if match is None:
+                    raise ValueError("GitHub did not return the expected PR URL")
+                pr = {"number": int(match.group(1)), "url": url, "headRefOid": head}
+            if pr.get("headRefOid") != head:
+                raise ValueError("open PR head does not match pushed HEAD")
+            number = pr.get("number")
+            url = pr.get("url")
+            if isinstance(number, bool) or not isinstance(number, int) or not isinstance(url, str):
+                raise ValueError("GitHub PR receipt is incomplete")
+        except (ValueError, OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+            return Outcome.failed(f"open PR refused: {exc}")
+
+        result = {
+            "git_root": str(git_root),
+            "branch": branch,
+            "head_sha": head,
+            "base_sha": current_main,
+            "pr_number": number,
+            "pr_url": url,
+            "commit_work_ids": list(request.commit_work_ids),
+        }
+        evidence = [
+            {
+                "kind": OPEN_PR_ACTION,
+                "repository": "ClearspeedRevOps/sfdc",
+                "branch": branch,
+                "head_sha": head,
+                "base_sha": current_main,
+                "pr_number": number,
+                "pr_url": url,
+                "pushed": True,
+                "contains_current_main": True,
+                "merged": False,
+            }
+        ]
+        return Outcome.success(result, evidence)
+
+    def _run(self, cwd: Path, argv: Sequence[str]) -> CommandResult:
+        completed = self.runner(argv, cwd, self.timeout_seconds)
+        if completed.returncode != 0:
+            raise ValueError(f"delivery command failed: {_failure_detail(completed)}")
+        return completed
+
+
+def _porcelain_paths(status: str) -> set[str]:
+    paths = set()
+    for line in status.splitlines():
+        if not line:
+            continue
+        if len(line) < 4 or " -> " in line:
+            raise ValueError("git status contains an unsupported path shape")
+        paths.add(line[3:])
+    return paths

@@ -47,6 +47,10 @@ Named Apex tests are live-validated against Partial metadata, capped at ten
 classes, run with coverage, and succeed only on a reconciled non-zero pass.
 Source retrieve admits one exact Partial component into a clean, named, linked
 SFDC worktree and rejects deletions, unrelated paths, broad retrieves, and main.
+Commit source stages and commits only files whose current hashes match successful
+source-producing ledger evidence; it rejects unrelated dirt and does not push.
+Open PR accepts only successful commit work-item IDs, proves their branch contains
+current `origin/main`, pushes that exact HEAD, and targets `ClearspeedRevOps/sfdc`.
 Linear, GitHub, Slack,
 deployment, scheduling, and LLM adapters remain absent. The old Atlas is not a
 runtime dependency.
@@ -90,4 +94,9 @@ atlas-next --db /tmp/atlas-next.sqlite salesforce-apex-test \
 atlas-next --db /tmp/atlas-next.sqlite salesforce-retrieve-source \
   ApexClass AtlasAcceptanceApexService \
   --project-dir /path/to/isolated-sfdc-worktree/salesforce
+atlas-next --db /tmp/atlas-next.sqlite commit-source <source-work-id> \
+  --message 'chore: capture Partial acceptance service'
+atlas-next --db /tmp/atlas-next.sqlite open-pr <commit-work-id> \
+  --title 'Capture Partial acceptance service' \
+  --body 'Exact Partial retrieval with independent hashes and named Apex tests.'
 ```

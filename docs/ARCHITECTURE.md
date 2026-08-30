@@ -89,3 +89,14 @@ retrieves one exact component from Partial into a clean, named, linked SFDC
 worktree. The postcondition is a non-zero bounded set of regular files only
 under that project's `force-app/main/default`; deletions, renames, unrelated
 paths, primary/main checkouts, wildcard components, and production are refused.
+
+`delivery.commit_source` consumes successful source-producing ledger item IDs,
+re-hashes every proven file, requires the complete worktree dirt population to
+equal those files, stages exactly that set, and records the resulting commit SHA.
+It cannot accept caller-supplied paths, stage unrelated work, push, or open a PR.
+
+`delivery.open_pr` consumes only successful commit ledger IDs from one clean
+branch. It fetches `origin/main`, refuses a behind branch, proves every linked
+commit is in HEAD, asserts the governed `ClearspeedRevOps/sfdc` repository,
+pushes that exact branch, and creates or reuses one PR targeting `main`. It does
+not merge, deploy, or infer that CI passed.
