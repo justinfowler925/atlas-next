@@ -158,6 +158,7 @@ class AuthorSource:
                 raise ValueError("worktree contains dirt outside the retrieved component")
             _validate_content(request.path, request.content, metadata_type, component_name)
             original_content = absolute.read_text(encoding="utf-8")
+            attempted_bytes = request.content.encode("utf-8")
             try:
                 absolute.write_text(request.content, encoding="utf-8")
                 authored_sha = _sha256(absolute)
@@ -182,7 +183,12 @@ class AuthorSource:
                     for path in sorted(dirty_after)
                 ]
             except Exception:
-                absolute.write_text(original_content, encoding="utf-8")
+                if (
+                    absolute.is_file()
+                    and not absolute.is_symlink()
+                    and absolute.read_bytes() == attempted_bytes
+                ):
+                    absolute.write_text(original_content, encoding="utf-8")
                 raise
         except (ValueError, OSError, subprocess.SubprocessError, UnicodeError, ET.ParseError) as exc:
             return Outcome.failed(f"Salesforce source authoring refused: {exc}")

@@ -206,6 +206,64 @@ def test_author_refuses_metadata_xml_with_wrong_root():
         )
 
 
+def test_author_preserves_concurrent_target_edit_when_postwrite_check_fails(tmp_path):
+    git_root = tmp_path / "worktree"
+    path = "salesforce/force-app/main/default/classes/Service.cls"
+    source = git_root / path
+    source.parent.mkdir(parents=True)
+    source.write_text("public class Service {}\n")
+    baseline = _sha(source)
+    concurrent = "public class Service { public static void concurrent() {} }\n"
+
+    with Store(tmp_path / "state.sqlite3") as store:
+        retrieved = store.enqueue(SOURCE_RETRIEVE_ACTION, {})
+        assert store.claim(retrieved.id, "retriever") is not None
+        store.succeed(
+            retrieved.id,
+            "retriever",
+            result={
+                "git_root": str(git_root),
+                "branch": "feature",
+                "type": "ApexClass",
+                "name": "Service",
+                "files": [{"path": path, "sha256": baseline}],
+            },
+            evidence=[{"kind": SOURCE_RETRIEVE_ACTION}],
+        )
+        status_calls = 0
+
+        def runner(argv, _cwd, _timeout):
+            nonlocal status_calls
+            if argv == ["git", "branch", "--show-current"]:
+                return CommandResult(0, "feature\n", "")
+            if argv == ["git", "status", "--porcelain=v1", "--untracked-files=all"]:
+                status_calls += 1
+                if status_calls == 1:
+                    return CommandResult(0, "", "")
+                source.write_text(concurrent)
+                return CommandResult(0, f" M {path}\n M unrelated.txt\n", "")
+            raise AssertionError(argv)
+
+        item = store.enqueue(
+            AUTHOR_SOURCE_ACTION,
+            {
+                "retrieve_work_id": retrieved.id,
+                "path": path,
+                "expected_sha256": baseline,
+                "content": "public class Service { public static void atlas() {} }\n",
+            },
+        )
+        completed = Engine(
+            store,
+            {AUTHOR_SOURCE_ACTION: AuthorSource(store, runner=runner)},
+            worker_id="test",
+            execution_enabled=True,
+        ).run_once(work_id=item.id).item
+
+    assert completed is not None and completed.state is WorkState.FAILED
+    assert source.read_text() == concurrent
+
+
 def test_author_rejects_malformed_or_entity_xml():
     base = {
         "retrieve_work_id": "one",
