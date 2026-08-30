@@ -45,6 +45,8 @@ Content diff retrieves one exact component from both orgs into Atlas-owned
 artifacts and compares every retrieved source file by SHA-256.
 Named Apex tests are live-validated against Partial metadata, capped at ten
 classes, run with coverage, and succeed only on a reconciled non-zero pass.
+Source retrieve admits one exact Partial component into a clean, named, linked
+SFDC worktree and rejects deletions, unrelated paths, broad retrieves, and main.
 Linear, GitHub, Slack,
 deployment, scheduling, and LLM adapters remain absent. The old Atlas is not a
 runtime dependency.
@@ -85,4 +87,7 @@ atlas-next --db /tmp/atlas-next.sqlite salesforce-metadata-content-diff \
   Flow Set_Close_Date_Last_Updated
 atlas-next --db /tmp/atlas-next.sqlite salesforce-apex-test \
   CsHandoffIntakeSchemaTest
+atlas-next --db /tmp/atlas-next.sqlite salesforce-retrieve-source \
+  ApexClass AtlasAcceptanceApexService \
+  --project-dir /path/to/isolated-sfdc-worktree/salesforce
 ```

@@ -10,10 +10,14 @@ from atlas_next.salesforce import CommandResult
 from atlas_next.salesforce_metadata import (
     METADATA_CONTENT_DIFF_ACTION,
     METADATA_DIFF_ACTION,
+    SOURCE_RETRIEVE_ACTION,
     MetadataContentDiffRequest,
     MetadataDiffRequest,
     SalesforceMetadataContentDiff,
     SalesforceMetadataDiff,
+    SalesforceSourceRetrieve,
+    SourceRetrieveRequest,
+    _validate_retrieved_changes,
 )
 
 
@@ -279,3 +283,86 @@ def test_content_diff_refuses_non_project_and_empty_retrieve(tmp_path):
         ).run_once(work_id=item.id).item
     assert completed is not None and completed.state is WorkState.FAILED
     assert "not a Salesforce project" in (completed.error or "")
+
+
+def test_source_retrieve_contract_has_no_prod_path_or_command_escape():
+    for key in ("environment", "target_org", "output_dir", "command", "manifest"):
+        with pytest.raises(ValueError, match=f"unexpected keys: {key}"):
+            SourceRetrieveRequest.from_payload(
+                {"type": "ApexClass", "name": "Service", key: "anything"}
+            )
+    with pytest.raises(ValueError, match="exactly one"):
+        SourceRetrieveRequest.from_payload({"type": "ApexClass", "name": "Service*"})
+
+
+def test_source_retrieve_requires_clean_linked_worktree_and_scopes_changes(tmp_path):
+    git_root = tmp_path / "worktree"
+    project = git_root / "salesforce"
+    project.mkdir(parents=True)
+    (project / "sfdx-project.json").write_text("{}")
+    retrieved = False
+    calls = []
+
+    def runner(argv, cwd, timeout):
+        nonlocal retrieved
+        calls.append((list(argv), cwd, timeout))
+        if argv[:2] == ["git", "rev-parse"] and argv[-1] == "--show-toplevel":
+            return CommandResult(0, str(git_root), "")
+        if argv[:3] == ["git", "branch", "--show-current"]:
+            return CommandResult(0, "justin-fowler/atlas-proof\n", "")
+        if argv[:2] == ["git", "rev-parse"] and argv[-1] == "--git-dir":
+            return CommandResult(0, str(tmp_path / "repo/.git/worktrees/proof"), "")
+        if argv[:2] == ["git", "rev-parse"] and argv[-1] == "--git-common-dir":
+            return CommandResult(0, str(tmp_path / "repo/.git"), "")
+        if argv[:3] == ["git", "status", "--porcelain=v1"]:
+            status = "?? salesforce/force-app/main/default/classes/Service.cls\n" if retrieved else ""
+            return CommandResult(0, status, "")
+        assert argv[:4] == ["sf", "project", "retrieve", "start"]
+        source = project / "force-app/main/default/classes/Service.cls"
+        source.parent.mkdir(parents=True)
+        source.write_text("public class Service {}")
+        retrieved = True
+        return CommandResult(0, _retrieved(), "")
+
+    with Store(tmp_path / "state.sqlite3") as store:
+        item = store.enqueue(
+            SOURCE_RETRIEVE_ACTION, {"type": "ApexClass", "name": "Service"}
+        )
+        completed = Engine(
+            store,
+            {
+                SOURCE_RETRIEVE_ACTION: SalesforceSourceRetrieve(
+                    partial_alias="dod-check", project_dir=project, runner=runner
+                )
+            },
+            worker_id="test",
+            execution_enabled=True,
+        ).run_once(work_id=item.id).item
+
+    sf_call = next(call for call in calls if call[0][0] == "sf")
+    assert sf_call[0] == [
+        "sf", "project", "retrieve", "start", "--metadata", "ApexClass:Service",
+        "--target-org", "dod-check", "--ignore-conflicts", "--wait", "10", "--json",
+    ]
+    assert completed is not None and completed.state is WorkState.SUCCEEDED
+    assert completed.result["file_count"] == 1
+    assert completed.result["files"][0]["path"].endswith("classes/Service.cls")
+    assert completed.evidence[0]["isolated_worktree"] is True
+    assert completed.evidence[0]["metadata_deployed"] is False
+
+
+def test_source_retrieve_rejects_dirty_primary_or_out_of_scope_changes(tmp_path):
+    git_root = tmp_path / "worktree"
+    allowed = git_root / "salesforce/force-app/main/default/classes/Service.cls"
+    allowed.parent.mkdir(parents=True)
+    allowed.write_text("ok")
+    with pytest.raises(ValueError, match="unsupported git status"):
+        _validate_retrieved_changes(
+            " D salesforce/force-app/main/default/classes/Service.cls\n",
+            git_root,
+            "salesforce",
+        )
+    outside = git_root / "README.md"
+    outside.write_text("bad")
+    with pytest.raises(ValueError, match="out-of-scope"):
+        _validate_retrieved_changes("?? README.md\n", git_root, "salesforce")

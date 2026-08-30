@@ -16,6 +16,7 @@ from .salesforce import CommandResult, CommandRunner, _failure_detail, _json_err
 
 METADATA_DIFF_ACTION = "salesforce.metadata_diff"
 METADATA_CONTENT_DIFF_ACTION = "salesforce.metadata_content_diff"
+SOURCE_RETRIEVE_ACTION = "salesforce.retrieve_source"
 _COMPONENT_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_. /-]{0,199}$")
 SUPPORTED_METADATA_TYPES = frozenset(
     {
@@ -93,6 +94,17 @@ class MetadataContentDiffRequest:
         ):
             raise ValueError("name must identify exactly one metadata component")
         return cls(metadata_type, name)
+
+
+@dataclass(frozen=True)
+class SourceRetrieveRequest:
+    metadata_type: str
+    component_name: str
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> SourceRetrieveRequest:
+        parsed = MetadataContentDiffRequest.from_payload(payload)
+        return cls(parsed.metadata_type, parsed.component_name)
 
 
 ProjectRunner = Callable[[Sequence[str], Path, float], CommandResult]
@@ -302,6 +314,117 @@ class SalesforceMetadataContentDiff:
         return Outcome.success(result, evidence)
 
 
+class SalesforceSourceRetrieve:
+    """Retrieve one exact Partial component into a clean isolated git worktree."""
+
+    def __init__(
+        self,
+        *,
+        partial_alias: str,
+        project_dir: Path,
+        runner: ProjectRunner = run_project_command,
+        timeout_seconds: float = 660,
+    ) -> None:
+        self.partial_alias = partial_alias.strip()
+        self.project_dir = project_dir.resolve()
+        self.runner = runner
+        self.timeout_seconds = timeout_seconds
+
+    def __call__(self, item: WorkItem) -> Outcome:
+        try:
+            request = SourceRetrieveRequest.from_payload(item.payload)
+            if not self.partial_alias:
+                raise ValueError("partial target alias is required")
+            if not (self.project_dir / "sfdx-project.json").is_file():
+                raise ValueError("configured project_dir is not a Salesforce project")
+            git_root = Path(
+                self._git(["git", "rev-parse", "--show-toplevel"]).stdout.strip()
+            ).resolve()
+            branch = self._git(["git", "branch", "--show-current"]).stdout.strip()
+            if not branch or branch in {"main", "master"}:
+                raise ValueError("source retrieve requires a named non-main branch")
+            git_dir = Path(self._git(["git", "rev-parse", "--path-format=absolute", "--git-dir"]).stdout.strip())
+            common_dir = Path(
+                self._git(
+                    ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]
+                ).stdout.strip()
+            )
+            if git_dir.resolve() == common_dir.resolve():
+                raise ValueError("source retrieve requires an isolated linked worktree")
+            if self._git(["git", "status", "--porcelain=v1"]).stdout:
+                raise ValueError("source retrieve requires a clean worktree")
+            project_prefix = self.project_dir.relative_to(git_root).as_posix()
+            completed = self.runner(
+                [
+                    "sf",
+                    "project",
+                    "retrieve",
+                    "start",
+                    "--metadata",
+                    f"{request.metadata_type}:{request.component_name}",
+                    "--target-org",
+                    self.partial_alias,
+                    "--ignore-conflicts",
+                    "--wait",
+                    "10",
+                    "--json",
+                ],
+                self.project_dir,
+                self.timeout_seconds,
+            )
+            if completed.returncode != 0:
+                return Outcome.failed(
+                    f"salesforce source retrieve failed for "
+                    f"{request.metadata_type}:{request.component_name}@{self.partial_alias}: "
+                    f"{_failure_detail(completed)}"
+                )
+            _validate_retrieve_response(completed.stdout)
+            status = self._git(["git", "status", "--porcelain=v1"]).stdout
+            changed = _validate_retrieved_changes(status, git_root, project_prefix)
+        except (ValueError, OSError, subprocess.SubprocessError) as exc:
+            return Outcome.failed(f"salesforce source retrieve refused: {exc}")
+
+        files = [
+            {
+                "path": path,
+                "sha256": hashlib.sha256((git_root / path).read_bytes()).hexdigest(),
+                "bytes": (git_root / path).stat().st_size,
+            }
+            for path in changed
+        ]
+        result = {
+            "environment": "partial",
+            "target_alias": self.partial_alias,
+            "type": request.metadata_type,
+            "name": request.component_name,
+            "git_root": str(git_root),
+            "branch": branch,
+            "files": files,
+            "file_count": len(files),
+        }
+        evidence = [
+            {
+                "kind": SOURCE_RETRIEVE_ACTION,
+                "environment": "partial",
+                "target_alias": self.partial_alias,
+                "type": request.metadata_type,
+                "name": request.component_name,
+                "branch": branch,
+                "file_count": len(files),
+                "isolated_worktree": True,
+                "production_execution": False,
+                "metadata_deployed": False,
+            }
+        ]
+        return Outcome.success(result, evidence)
+
+    def _git(self, argv: Sequence[str]) -> CommandResult:
+        completed = self.runner(argv, self.project_dir, 30)
+        if completed.returncode != 0:
+            raise ValueError(f"git preflight failed: {_failure_detail(completed)}")
+        return completed
+
+
 def _parse_inventory(stdout: str, expected_type: str) -> set[str]:
     envelope = json.loads(stdout)
     if int(envelope.get("status", 0)) != 0:
@@ -368,3 +491,31 @@ def _artifact_manifest(output_dir: Path) -> dict[str, str]:
 def _manifest_hash(manifest: dict[str, str]) -> str:
     canonical = "\n".join(f"{path}\0{digest}" for path, digest in sorted(manifest.items()))
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _validate_retrieved_changes(status: str, git_root: Path, project_prefix: str) -> list[str]:
+    lines = [line for line in status.splitlines() if line]
+    if not lines:
+        raise ValueError("source retrieve produced zero git changes")
+    if len(lines) > 20:
+        raise ValueError("source retrieve changed more than 20 files")
+    allowed_root = f"{project_prefix}/force-app/main/default/"
+    changed = []
+    total_bytes = 0
+    for line in lines:
+        if len(line) < 4 or line[:2] not in {"??", " M", "M ", "MM", "A "}:
+            raise ValueError(f"source retrieve produced unsupported git status {line[:2]!r}")
+        path = line[3:]
+        if not path.startswith(allowed_root) or " -> " in path:
+            raise ValueError(f"source retrieve changed an out-of-scope path: {path}")
+        absolute = (git_root / path).resolve()
+        if not absolute.is_relative_to(git_root) or not absolute.is_file() or absolute.is_symlink():
+            raise ValueError(f"source retrieve did not produce one regular file: {path}")
+        size = absolute.stat().st_size
+        if size > 5_000_000:
+            raise ValueError(f"source retrieve produced a file larger than 5 MB: {path}")
+        total_bytes += size
+        changed.append(path)
+    if total_bytes > 10_000_000:
+        raise ValueError("source retrieve exceeded the 10 MB artifact bound")
+    return sorted(changed)

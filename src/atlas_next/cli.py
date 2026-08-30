@@ -19,8 +19,10 @@ from .salesforce_test import APEX_TEST_ACTION, SalesforceApexTest
 from .salesforce_metadata import (
     METADATA_CONTENT_DIFF_ACTION,
     METADATA_DIFF_ACTION,
+    SOURCE_RETRIEVE_ACTION,
     SalesforceMetadataContentDiff,
     SalesforceMetadataDiff,
+    SalesforceSourceRetrieve,
 )
 from .store import Store
 
@@ -100,6 +102,14 @@ def _parser() -> argparse.ArgumentParser:
     )
     apex_test.add_argument("classes", nargs="+")
     apex_test.add_argument("--partial-alias", default="dod-check")
+    retrieve = sub.add_parser(
+        "salesforce-retrieve-source",
+        help="retrieve one exact Partial component into a clean isolated worktree",
+    )
+    retrieve.add_argument("type")
+    retrieve.add_argument("name")
+    retrieve.add_argument("--partial-alias", default="dod-check")
+    retrieve.add_argument("--project-dir", type=Path, required=True)
     return parser
 
 
@@ -217,6 +227,16 @@ def main(argv: list[str] | None = None) -> int:
                 APEX_TEST_ACTION,
                 {"classes": args.classes},
                 SalesforceApexTest(partial_alias=args.partial_alias),
+            )
+        if args.command == "salesforce-retrieve-source":
+            return _execute(
+                store,
+                SOURCE_RETRIEVE_ACTION,
+                {"type": args.type, "name": args.name},
+                SalesforceSourceRetrieve(
+                    partial_alias=args.partial_alias,
+                    project_dir=args.project_dir,
+                ),
             )
         report = snapshot(
             store,

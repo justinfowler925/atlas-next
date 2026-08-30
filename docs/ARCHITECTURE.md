@@ -83,3 +83,9 @@ commands cannot reach the subprocess.
 only. It accepts one to ten exact class API names, proves every class exists in
 the live Partial inventory, runs only those classes with coverage enabled, and
 requires a non-zero, reconciled, passing test summary with a `707` run id.
+
+`salesforce.retrieve_source` is the first GitHub-delivery building block. It
+retrieves one exact component from Partial into a clean, named, linked SFDC
+worktree. The postcondition is a non-zero bounded set of regular files only
+under that project's `force-app/main/default`; deletions, renames, unrelated
+paths, primary/main checkouts, wildcard components, and production are refused.
