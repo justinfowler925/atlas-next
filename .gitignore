@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+.atlas-next/
+dist/
+build/
+*.egg-info/
+
