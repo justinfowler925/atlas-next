@@ -83,9 +83,3 @@ commands cannot reach the subprocess.
 only. It accepts one to ten exact class API names, proves every class exists in
 the live Partial inventory, runs only those classes with coverage enabled, and
 requires a non-zero, reconciled, passing test summary with a `707` run id.
-
-`salesforce.deploy_dry_run` accepts only existing files below the configured
-project's `force-app/main/default` tree and one to ten named tests. It always
-targets Partial, always emits `sf project deploy start --dry-run`, and accepts
-success only when Salesforce returns a completed check-only `0Af` deployment
-with positive, reconciled component and test populations and zero errors.
