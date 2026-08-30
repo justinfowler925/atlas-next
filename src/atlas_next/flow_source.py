@@ -76,6 +76,7 @@ class CreateFlowSource:
         self.timeout_seconds = timeout_seconds
 
     def __call__(self, item: WorkItem) -> Outcome:
+        created: tuple[Path, bytes] | None = None
         try:
             request = CreateFlowSourceRequest.from_payload(item.payload)
             _validate_flow_xml(request.content)
@@ -109,13 +110,16 @@ class CreateFlowSource:
             absolute = (git_root / relative).resolve()
             if not absolute.is_relative_to(git_root) or absolute.exists():
                 raise ValueError("Flow source path already exists or escaped the worktree")
+            encoded = request.content.encode("utf-8")
             absolute.parent.mkdir(parents=True, exist_ok=True)
-            absolute.write_text(request.content, encoding="utf-8")
+            absolute.write_bytes(encoded)
+            created = (absolute, encoded)
             status = self._git(["git", "status", "--porcelain=v1"]).stdout
             if status.strip() != f"?? {relative}":
                 raise ValueError("Flow creation did not produce exactly one expected source file")
-            digest = hashlib.sha256(absolute.read_bytes()).hexdigest()
+            digest = hashlib.sha256(encoded).hexdigest()
         except (ValueError, OSError, subprocess.SubprocessError, ET.ParseError) as exc:
+            _remove_created(created)
             return Outcome.failed(f"Salesforce Flow source creation refused: {exc}")
 
         files = [{"path": relative, "sha256": digest, "bytes": absolute.stat().st_size}]
@@ -161,3 +165,16 @@ def _validate_flow_xml(content: str) -> None:
     statuses = root.findall(f"{{{_SOAP_NAMESPACE}}}status")
     if len(statuses) != 1 or statuses[0].text != "Active":
         raise ValueError("Flow source must explicitly deploy its latest version as Active")
+
+
+def _remove_created(created: tuple[Path, bytes] | None) -> None:
+    """Remove only the exact bytes created by this failed action."""
+    if created is None:
+        return
+    path, expected = created
+    try:
+        if path.is_file() and not path.is_symlink() and path.read_bytes() == expected:
+            path.unlink()
+            path.parent.rmdir()
+    except OSError:
+        return

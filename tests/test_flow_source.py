@@ -85,3 +85,45 @@ def test_create_flow_rejects_draft_wrong_root_and_entities():
         _validate_flow_xml('<ApexClass xmlns="http://soap.sforce.com/2006/04/metadata"/>')
     with pytest.raises(ValueError, match="entities"):
         _validate_flow_xml('<!DOCTYPE Flow [<!ENTITY x "y">]><Flow/>')
+
+
+def test_create_flow_removes_its_file_when_postwrite_status_fails(tmp_path):
+    git_root = tmp_path / "worktree"
+    project = git_root / "salesforce"
+    project.mkdir(parents=True)
+    (project / "sfdx-project.json").write_text("{}")
+    relative = (
+        "salesforce/force-app/main/default/flows/"
+        "Atlas_Acceptance_Flow.flow-meta.xml"
+    )
+    status_calls = 0
+
+    def runner(argv, _cwd, _timeout):
+        nonlocal status_calls
+        if argv[:2] == ["git", "rev-parse"] and argv[-1] == "--show-toplevel":
+            return CommandResult(0, str(git_root), "")
+        if argv == ["git", "branch", "--show-current"]:
+            return CommandResult(0, "justin-fowler/flow\n", "")
+        if argv[:2] == ["git", "rev-parse"] and argv[-1] == "--git-dir":
+            return CommandResult(0, str(tmp_path / "repo/.git/worktrees/flow"), "")
+        if argv[:2] == ["git", "rev-parse"] and argv[-1] == "--git-common-dir":
+            return CommandResult(0, str(tmp_path / "repo/.git"), "")
+        if argv == ["git", "status", "--porcelain=v1"]:
+            status_calls += 1
+            return CommandResult(0, "" if status_calls == 1 else "?? other.txt\n", "")
+        raise AssertionError(argv)
+
+    with Store(tmp_path / "state.sqlite3") as store:
+        item = store.enqueue(
+            CREATE_FLOW_SOURCE_ACTION,
+            {"name": "Atlas_Acceptance_Flow", "content": FLOW},
+        )
+        completed = Engine(
+            store,
+            {CREATE_FLOW_SOURCE_ACTION: CreateFlowSource(project_dir=project, runner=runner)},
+            worker_id="test",
+            execution_enabled=True,
+        ).run_once(work_id=item.id).item
+
+    assert completed is not None and completed.state is WorkState.FAILED
+    assert not (git_root / relative).exists()
