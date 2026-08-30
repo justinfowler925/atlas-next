@@ -66,3 +66,8 @@ of at most 200. Atlas live-describes the object, proves that selected, filtered,
 and ordered fields support the requested operations, escapes every literal, and
 then generates the query. Relationship paths, raw SOQL, shell commands,
 encrypted fields, unbounded results, and undeclared response fields fail closed.
+
+`salesforce.metadata_diff` compares the component-name inventory for one fixed,
+supported metadata type across Partial and production. It runs exactly two
+read-only Metadata API list commands and records population counts plus hashes;
+it does not mistake matching names for matching component content.
