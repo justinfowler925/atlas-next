@@ -163,3 +163,7 @@ head-SHA lock. `delivery.verify_sandbox_deploy` links the immutable merge SHA to
 exactly one successful `Salesforce CI` push run and its successful
 `Deploy (sandbox)` job. This final receipt is the only capability admitted for
 historical delivery/CI/release coverage; production remains untouched.
+Both pre-merge verification and merge-time re-verification require the production
+validation and deployment checks to exist and be explicitly skipped. The post-merge
+receipt independently requires the production validation and deployment jobs to be
+skipped in the exact push run; a successful production job is a refusal, not green.

@@ -532,6 +532,7 @@ class VerifyPr:
                 raise ValueError(f"checks are not green: {', '.join(bad)}")
             if checks["Validate (sandbox)"] != "SUCCESS":
                 raise ValueError("Validate (sandbox) did not succeed")
+            _require_production_checks_skipped(checks)
             self._run(git_root, ["git", "fetch", "origin", "main"])
             current_main = self._run(git_root, ["git", "rev-parse", "origin/main"]).stdout.strip()
             if pr.get("baseRefOid") != current_main:
@@ -638,6 +639,7 @@ class MergePr:
             )
             if bad or checks["Validate (sandbox)"] != "SUCCESS":
                 raise ValueError("PR checks are no longer green")
+            _require_production_checks_skipped(checks)
             self._run(git_root, ["git", "fetch", "origin", "main"])
             current_main = self._run(
                 git_root, ["git", "rev-parse", "origin/main"]
@@ -800,6 +802,7 @@ class VerifySandboxDeploy:
             deploys = [job for job in jobs if job.get("name") == "Deploy (sandbox)"]
             if len(deploys) != 1 or deploys[0].get("conclusion") != "success":
                 raise ValueError("Deploy (sandbox) did not succeed exactly once")
+            _require_production_jobs_skipped(jobs)
             deploy = deploys[0]
             job_id = deploy.get("databaseId")
             if isinstance(job_id, bool) or not isinstance(job_id, int):
@@ -832,12 +835,24 @@ class VerifySandboxDeploy:
             }
         ]
         return Outcome.success(result, evidence)
-
     def _run(self, cwd: Path, argv: Sequence[str]) -> CommandResult:
         completed = self.runner(argv, cwd, self.timeout_seconds)
         if completed.returncode != 0:
             raise ValueError(f"sandbox deploy command failed: {_failure_detail(completed)}")
         return completed
+
+
+def _require_production_checks_skipped(checks: dict[str, str]) -> None:
+    for name in ("Validate (production)", "Deploy (production)"):
+        if checks.get(name) != "SKIPPED":
+            raise ValueError(f"{name} was not explicitly skipped")
+
+
+def _require_production_jobs_skipped(jobs: list[dict[str, Any]]) -> None:
+    for name in ("Validate (production)", "Deploy (production)"):
+        matches = [job for job in jobs if job.get("name") == name]
+        if len(matches) != 1 or matches[0].get("conclusion") != "skipped":
+            raise ValueError(f"{name} was not explicitly skipped")
 
 
 def _porcelain_paths(status: str) -> set[str]:

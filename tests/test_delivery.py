@@ -22,6 +22,8 @@ from atlas_next.delivery import (
     VerifySandboxDeploy,
     VerifySandboxDeployRequest,
     _parse_checks,
+    _require_production_checks_skipped,
+    _require_production_jobs_skipped,
 )
 from atlas_next.salesforce import CommandResult
 from atlas_next.salesforce_metadata import SOURCE_RETRIEVE_ACTION
@@ -29,6 +31,23 @@ from atlas_next.source_author import AUTHOR_SOURCE_ACTION
 from atlas_next.flow_source import CREATE_FLOW_SOURCE_ACTION
 from atlas_next.lwc_source import CREATE_LWC_SOURCE_ACTION
 from atlas_next.report_source import CREATE_REPORT_SOURCE_ACTION
+
+
+def test_delivery_requires_production_checks_and_jobs_to_be_explicitly_skipped():
+    with pytest.raises(ValueError, match="Deploy \\(production\\) was not explicitly skipped"):
+        _require_production_checks_skipped(
+            {
+                "Validate (production)": "SKIPPED",
+                "Deploy (production)": "SUCCESS",
+            }
+        )
+    with pytest.raises(ValueError, match="Validate \\(production\\) was not explicitly skipped"):
+        _require_production_jobs_skipped(
+            [
+                {"name": "Validate (production)", "conclusion": "success"},
+                {"name": "Deploy (production)", "conclusion": "skipped"},
+            ]
+        )
 
 
 def test_commit_contract_rejects_commands_paths_and_bad_messages():
@@ -293,6 +312,7 @@ def test_verify_pr_waits_for_named_checks_and_proves_current_main(tmp_path):
             "conclusion": "SUCCESS",
         },
         {"name": "Deploy (production)", "status": "COMPLETED", "conclusion": "SKIPPED"},
+        {"name": "Validate (production)", "status": "COMPLETED", "conclusion": "SKIPPED"},
     ]
     pr = {
         "number": 999,
@@ -333,7 +353,7 @@ def test_verify_pr_waits_for_named_checks_and_proves_current_main(tmp_path):
 
     assert ["gh", "pr", "checks", "999", "--watch", "--interval", "10"] in commands
     assert completed is not None and completed.state is WorkState.SUCCEEDED
-    assert completed.result["check_count"] == 4
+    assert completed.result["check_count"] == 5
     assert completed.evidence[0]["sandbox_validation"] == "SUCCESS"
     assert completed.evidence[0]["merge_state"] == "CLEAN"
 
@@ -373,6 +393,8 @@ def test_merge_pr_rechecks_head_and_current_main_then_records_receipt(tmp_path):
             "status": "COMPLETED",
             "conclusion": "SUCCESS",
         },
+        {"name": "Validate (production)", "status": "COMPLETED", "conclusion": "SKIPPED"},
+        {"name": "Deploy (production)", "status": "COMPLETED", "conclusion": "SKIPPED"},
     ]
     open_pr = {
         "number": 999,
@@ -542,6 +564,11 @@ def test_verify_sandbox_deploy_links_exact_merge_to_successful_job(tmp_path):
                                     "name": "Deploy (sandbox)",
                                     "databaseId": job_id,
                                     "conclusion": "success",
+                                },
+                                {
+                                    "name": "Validate (production)",
+                                    "databaseId": 788,
+                                    "conclusion": "skipped",
                                 },
                                 {
                                     "name": "Deploy (production)",
