@@ -71,3 +71,10 @@ encrypted fields, unbounded results, and undeclared response fields fail closed.
 supported metadata type across Partial and production. It runs exactly two
 read-only Metadata API list commands and records population counts plus hashes;
 it does not mistake matching names for matching component content.
+
+`salesforce.metadata_content_diff` closes that admitted gap for one exact
+component. It retrieves the component from both orgs into a bounded,
+Atlas-owned artifact directory, excludes transport manifests, hashes every
+source file, and reports content, missing-file, and extra-file differences.
+Wildcards, traversal, arbitrary metadata types, deploy flags, and caller-chosen
+commands cannot reach the subprocess.

@@ -28,7 +28,8 @@ This repository contains the replacement kernel only:
 - tests for the failure classes that made legacy Atlas untrustworthy.
 
 The admitted capabilities are `salesforce.describe`, `salesforce.count`,
-`salesforce.picklist_counts`, `salesforce.query`, and `salesforce.metadata_diff`:
+`salesforce.picklist_counts`, `salesforce.query`, `salesforce.metadata_diff`, and
+`salesforce.metadata_content_diff`:
 hardcoded read-only Salesforce CLI calls for one object in Partial or production.
 Count generates exactly `SELECT COUNT() FROM <validated_object>`; callers cannot
 supply SOQL, filters, fields, command strings, mutation verbs, or arbitrary targets.
@@ -40,6 +41,8 @@ live-validates the object and every field, generates SOQL internally, rejects
 relationship paths and encrypted fields, and caps output at 200 records.
 Metadata diff runs the same fixed inventory command in Partial and production
 for one whitelisted metadata type, then reports shared and org-only components.
+Content diff retrieves one exact component from both orgs into Atlas-owned
+artifacts and compares every retrieved source file by SHA-256.
 Linear, GitHub, Slack,
 deployment, scheduling, and LLM adapters remain absent. The old Atlas is not a
 runtime dependency.
@@ -72,4 +75,6 @@ atlas-next --db /tmp/atlas-next.sqlite salesforce-query Opportunity \
   --filter-json '[{"field":"StageName","operator":"eq","value":"Closed Won"}]' \
   --order-field CloseDate --order-direction desc --limit 10
 atlas-next --db /tmp/atlas-next.sqlite salesforce-metadata-diff Flow
+atlas-next --db /tmp/atlas-next.sqlite salesforce-metadata-content-diff \
+  Flow Set_Close_Date_Last_Updated
 ```

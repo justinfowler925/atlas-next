@@ -15,7 +15,12 @@ from .salesforce import (
     SalesforcePicklistCounts,
 )
 from .salesforce_query import QUERY_ACTION, SalesforceQuery
-from .salesforce_metadata import METADATA_DIFF_ACTION, SalesforceMetadataDiff
+from .salesforce_metadata import (
+    METADATA_CONTENT_DIFF_ACTION,
+    METADATA_DIFF_ACTION,
+    SalesforceMetadataContentDiff,
+    SalesforceMetadataDiff,
+)
 from .store import Store
 
 
@@ -72,6 +77,22 @@ def _parser() -> argparse.ArgumentParser:
     metadata.add_argument("type")
     metadata.add_argument("--partial-alias", default="dod-check")
     metadata.add_argument("--prod-alias", default="prod")
+    content = sub.add_parser(
+        "salesforce-metadata-content-diff",
+        help="retrieve and byte-compare one exact component across Partial and prod",
+    )
+    content.add_argument("type")
+    content.add_argument("name")
+    content.add_argument("--partial-alias", default="dod-check")
+    content.add_argument("--prod-alias", default="prod")
+    content.add_argument(
+        "--project-dir",
+        type=Path,
+        default=Path("/Users/justinfowler/Projects/sfdc/salesforce"),
+    )
+    content.add_argument(
+        "--artifact-root", type=Path, default=Path(".atlas-next/artifacts/metadata-diff")
+    )
     return parser
 
 
@@ -170,6 +191,17 @@ def main(argv: list[str] | None = None) -> int:
                 {"type": args.type},
                 SalesforceMetadataDiff(
                     {"partial": args.partial_alias, "prod": args.prod_alias}
+                ),
+            )
+        if args.command == "salesforce-metadata-content-diff":
+            return _execute(
+                store,
+                METADATA_CONTENT_DIFF_ACTION,
+                {"type": args.type, "name": args.name},
+                SalesforceMetadataContentDiff(
+                    {"partial": args.partial_alias, "prod": args.prod_alias},
+                    project_dir=args.project_dir,
+                    artifact_root=args.artifact_root,
                 ),
             )
         report = snapshot(
