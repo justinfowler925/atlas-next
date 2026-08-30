@@ -34,6 +34,8 @@ CAPABILITY_FAMILY = {
     "salesforce.author_source": "apex_logic_tests",
     # Admitted only after deployed lineage, activation parity, and runtime output proof.
     "salesforce.run_created_flow": "flow_automation",
+    # Admitted after live schema validation, all-or-none update, postcheck, and rollback proof.
+    "salesforce.update_records": "data_repair_migration",
     # A test runner alone is necessary evidence for Apex work, but cannot author or repair it.
     "salesforce.apex_test": None,
 }

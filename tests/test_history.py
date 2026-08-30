@@ -89,6 +89,16 @@ def test_flow_counts_only_after_runtime_proof_is_admitted():
     assert after["covered_ticket_count"] == 1
 
 
+def test_data_repair_counts_only_after_verified_update_is_admitted():
+    ticket = _ticket("REV-12", "Backfill stale Account values", "data repair")
+    before = coverage_report([ticket], {"salesforce.query"})
+    after = coverage_report(
+        [ticket], {"salesforce.query", "salesforce.update_records"}
+    )
+    assert before["covered_ticket_count"] == 0
+    assert after["covered_ticket_count"] == 1
+
+
 def test_history_database_is_opened_read_only(tmp_path):
     database = tmp_path / "history.sqlite"
     connection = sqlite3.connect(database)
