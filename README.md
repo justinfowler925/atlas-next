@@ -63,6 +63,12 @@ Historical coverage is measured against 163 real Salesforce workflows from the
 legacy 200-ticket corpus. See `docs/HISTORICAL_COVERAGE.md`; current strict
 capability-family coverage is 163/163 (100%).
 
+The representative replay gate is separate from static coverage. It requires 15
+real ticket IDs spanning all nine families and fresh successful terminal receipts
+from the live Salesforce workflows. Run it with `scripts/replay-history.py`; the
+checked-in sample is `replays/historical-15.json` and credential values never enter
+its receipt manifest.
+
 ## Verify
 
 ```bash
