@@ -18,6 +18,7 @@ from .source_author import AUTHOR_SOURCE_ACTION
 from .flow_source import CREATE_FLOW_SOURCE_ACTION
 from .lwc_source import CREATE_LWC_SOURCE_ACTION
 from .report_source import CREATE_REPORT_SOURCE_ACTION
+from .integration_source import CREATE_INTEGRATION_SOURCE_ACTION
 from .store import Store
 
 
@@ -243,6 +244,7 @@ class CommitSource:
                     CREATE_FLOW_SOURCE_ACTION,
                     CREATE_LWC_SOURCE_ACTION,
                     CREATE_REPORT_SOURCE_ACTION,
+                    CREATE_INTEGRATION_SOURCE_ACTION,
                 }
                 for source in sources
                 if source is not None

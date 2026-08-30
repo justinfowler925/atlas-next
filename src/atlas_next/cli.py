@@ -43,6 +43,11 @@ from .lwc_source import CREATE_LWC_SOURCE_ACTION, CreateLwcSource
 from .salesforce_lwc import VERIFY_LWC_DEPLOYMENT_ACTION, VerifyLwcDeployment
 from .report_source import CREATE_REPORT_SOURCE_ACTION, CreateReportSource
 from .salesforce_report import VERIFY_REPORT_EXECUTION_ACTION, VerifyReportExecution
+from .integration_source import CREATE_INTEGRATION_SOURCE_ACTION, CreateIntegrationSource
+from .salesforce_integration import (
+    VERIFY_INTEGRATION_EXECUTION_ACTION,
+    VerifyIntegrationExecution,
+)
 from .salesforce_flow import (
     RUN_CREATED_FLOW_ACTION,
     VERIFY_FLOW_ACTIVATION_ACTION,
@@ -218,6 +223,26 @@ def _parser() -> argparse.ArgumentParser:
     verify_report.add_argument("deploy_work_id")
     verify_report.add_argument("source_work_id")
     verify_report.add_argument("--partial-alias", default="dod-check")
+    create_integration = sub.add_parser(
+        "salesforce-create-integration-source",
+        help="create a bounded Apex REST integration, mock test, and Remote Site",
+    )
+    create_integration.add_argument("name")
+    create_integration.add_argument("--base-url", required=True)
+    create_integration.add_argument("--path", required=True)
+    create_integration.add_argument("--marker-field", required=True)
+    create_integration.add_argument("--expected-marker", required=True)
+    create_integration.add_argument("--project-dir", type=Path, required=True)
+    verify_integration = sub.add_parser(
+        "salesforce-verify-integration-execution",
+        help="execute a deployed Atlas-created REST integration in live Partial",
+    )
+    verify_integration.add_argument("deploy_work_id")
+    verify_integration.add_argument("source_work_id")
+    verify_integration.add_argument("--partial-alias", default="dod-check")
+    verify_integration.add_argument(
+        "--artifact-root", type=Path, default=Path(".atlas-next/artifacts")
+    )
     commit = sub.add_parser(
         "commit-source",
         help="commit only files proven by successful source-producing work items",
@@ -490,6 +515,33 @@ def main(argv: list[str] | None = None) -> int:
                     "source_work_id": args.source_work_id,
                 },
                 VerifyReportExecution(store, partial_alias=args.partial_alias),
+            )
+        if args.command == "salesforce-create-integration-source":
+            return _execute(
+                store,
+                CREATE_INTEGRATION_SOURCE_ACTION,
+                {
+                    "name": args.name,
+                    "base_url": args.base_url,
+                    "path": args.path,
+                    "marker_field": args.marker_field,
+                    "expected_marker": args.expected_marker,
+                },
+                CreateIntegrationSource(project_dir=args.project_dir),
+            )
+        if args.command == "salesforce-verify-integration-execution":
+            return _execute(
+                store,
+                VERIFY_INTEGRATION_EXECUTION_ACTION,
+                {
+                    "deploy_work_id": args.deploy_work_id,
+                    "source_work_id": args.source_work_id,
+                },
+                VerifyIntegrationExecution(
+                    store,
+                    partial_alias=args.partial_alias,
+                    artifact_root=args.artifact_root,
+                ),
             )
         if args.command == "commit-source":
             return _execute(
