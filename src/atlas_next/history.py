@@ -36,6 +36,8 @@ CAPABILITY_FAMILY = {
     "salesforce.run_created_flow": "flow_automation",
     # Admitted after live schema validation, all-or-none update, postcheck, and rollback proof.
     "salesforce.update_records": "data_repair_migration",
+    # Admitted after Shine usability, behavioral Jest, governed deploy, and live metadata proof.
+    "salesforce.verify_lwc_deployment": "lwc_page_experience",
     # A test runner alone is necessary evidence for Apex work, but cannot author or repair it.
     "salesforce.apex_test": None,
 }
