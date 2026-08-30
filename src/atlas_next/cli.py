@@ -48,6 +48,7 @@ from .salesforce_integration import (
     VERIFY_INTEGRATION_EXECUTION_ACTION,
     VerifyIntegrationExecution,
 )
+from .salesforce_authenticated import AUTHENTICATED_GET_ACTION, SalesforceAuthenticatedGet
 from .salesforce_flow import (
     RUN_CREATED_FLOW_ACTION,
     VERIFY_FLOW_ACTIVATION_ACTION,
@@ -241,6 +242,19 @@ def _parser() -> argparse.ArgumentParser:
     verify_integration.add_argument("source_work_id")
     verify_integration.add_argument("--partial-alias", default="dod-check")
     verify_integration.add_argument(
+        "--artifact-root", type=Path, default=Path(".atlas-next/artifacts")
+    )
+    authenticated_get = sub.add_parser(
+        "salesforce-authenticated-get",
+        help="perform one secret-safe credential-bound HTTP GET from Partial",
+    )
+    authenticated_get.add_argument("named_credential")
+    authenticated_get.add_argument("path")
+    authenticated_get.add_argument("--external-credential", required=True)
+    authenticated_get.add_argument("--credential-parameter", required=True)
+    authenticated_get.add_argument("--expected-status", type=int, default=200)
+    authenticated_get.add_argument("--partial-alias", default="dod-check")
+    authenticated_get.add_argument(
         "--artifact-root", type=Path, default=Path(".atlas-next/artifacts")
     )
     commit = sub.add_parser(
@@ -539,6 +553,22 @@ def main(argv: list[str] | None = None) -> int:
                 },
                 VerifyIntegrationExecution(
                     store,
+                    partial_alias=args.partial_alias,
+                    artifact_root=args.artifact_root,
+                ),
+            )
+        if args.command == "salesforce-authenticated-get":
+            return _execute(
+                store,
+                AUTHENTICATED_GET_ACTION,
+                {
+                    "credential_parameter": args.credential_parameter,
+                    "expected_status": args.expected_status,
+                    "external_credential": args.external_credential,
+                    "named_credential": args.named_credential,
+                    "path": args.path,
+                },
+                SalesforceAuthenticatedGet(
                     partial_alias=args.partial_alias,
                     artifact_root=args.artifact_root,
                 ),

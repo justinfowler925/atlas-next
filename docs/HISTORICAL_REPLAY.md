@@ -7,9 +7,10 @@ nine capability families and includes eight compound workflows.
 The run finished 15/15. Fresh terminal evidence included a bounded Account query;
 Partial-versus-production CustomObject inventory; executed Flow output; 2/2 Apex tests
 with 100% run coverage; live LWC metadata; a 107-row report; an all-or-none data update
-and exact-hash rollback; an external callout; and the exact merged-SHA sandbox deploy
-receipt. Apex authoring uses its governed source receipt from earlier the same day and
-requires a fresh live test terminal.
+and exact-hash rollback; an external callout; an authenticated HubSpot Named Credential
+GET returning HTTP 200 without retaining its body; and the exact merged-SHA sandbox
+deploy receipt. Apex authoring uses its governed source receipt from earlier the same day
+and requires a fresh live test terminal.
 
 The executable gate is `scripts/replay-history.py`. It opens both the historical ledger
 and receipt ledgers read-only, rejects stale or failed terminal receipts, requires the

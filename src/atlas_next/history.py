@@ -42,6 +42,7 @@ CAPABILITY_FAMILY = {
     "salesforce.verify_report_execution": "reporting_analytics",
     # Admitted after generated callout source, mocked tests, governed deploy, and live execution.
     "salesforce.verify_integration_execution": "integration_pipeline",
+    "salesforce.authenticated_get": "integration_pipeline",
     # A test runner alone is necessary evidence for Apex work, but cannot author or repair it.
     "salesforce.apex_test": None,
 }

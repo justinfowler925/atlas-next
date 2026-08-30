@@ -49,6 +49,12 @@ Source retrieve admits one exact Partial component into a clean, named, linked
 SFDC worktree and rejects deletions, unrelated paths, broad retrieves, and main.
 Commit source stages and commits only files whose current hashes match successful
 source-producing ledger evidence; it rejects unrelated dirt and does not push.
+
+`salesforce.authenticated_get` performs a bounded GET through a Partial Named
+Credential. The secret is referenced only by Salesforce credential merge-field name;
+Atlas records the HTTP status, response byte count, and response hash, never the body
+or credential value.
+
 Open PR accepts only successful commit work-item IDs, proves their branch contains
 current `origin/main`, pushes that exact HEAD, and targets `ClearspeedRevOps/sfdc`.
 Verify PR waits for GitHub checks, requires the sandbox validation and sibling

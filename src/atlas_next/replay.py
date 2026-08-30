@@ -20,7 +20,10 @@ REQUIRED_ACTIONS = {
         "salesforce.update_records",
         "salesforce.rollback_update",
     },
-    "integration_pipeline": {"salesforce.verify_integration_execution"},
+    "integration_pipeline": {
+        "salesforce.authenticated_get",
+        "salesforce.verify_integration_execution",
+    },
     "delivery_ci_release": {"delivery.verify_sandbox_deploy"},
 }
 
