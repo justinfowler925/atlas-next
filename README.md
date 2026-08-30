@@ -102,4 +102,5 @@ atlas-next --db /tmp/atlas-next.sqlite open-pr <commit-work-id> \
   --title 'Capture Partial acceptance service' \
   --body 'Exact Partial retrieval with independent hashes and named Apex tests.'
 atlas-next --db /tmp/atlas-next.sqlite verify-pr <open-pr-work-id>
+atlas-next --db /tmp/atlas-next.sqlite merge-pr <verify-pr-work-id>
 ```

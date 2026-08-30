@@ -20,6 +20,7 @@ from .store import Store
 COMMIT_SOURCE_ACTION = "delivery.commit_source"
 OPEN_PR_ACTION = "delivery.open_pr"
 VERIFY_PR_ACTION = "delivery.verify_pr"
+MERGE_PR_ACTION = "delivery.merge_pr"
 _MESSAGE_RE = re.compile(r"^(feat|fix|chore|test|docs|refactor): [^\r\n]{3,100}$")
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -108,6 +109,27 @@ class VerifyPullRequest:
         value = payload["open_pr_work_id"]
         if not isinstance(value, str) or not value:
             raise ValueError("open_pr_work_id must be non-empty text")
+        return cls(value)
+
+
+@dataclass(frozen=True)
+class MergePullRequest:
+    verify_pr_work_id: str
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> MergePullRequest:
+        if set(payload) != {"verify_pr_work_id"}:
+            unexpected = sorted(set(payload) - {"verify_pr_work_id"})
+            missing = sorted({"verify_pr_work_id"} - set(payload))
+            details = []
+            if missing:
+                details.append("missing keys: verify_pr_work_id")
+            if unexpected:
+                details.append(f"unexpected keys: {', '.join(unexpected)}")
+            raise ValueError("invalid delivery.merge_pr payload (" + "; ".join(details) + ")")
+        value = payload["verify_pr_work_id"]
+        if not isinstance(value, str) or not value:
+            raise ValueError("verify_pr_work_id must be non-empty text")
         return cls(value)
 
 
@@ -513,6 +535,149 @@ class VerifyPr:
         completed = self.runner(argv, cwd, self.timeout_seconds)
         if completed.returncode != 0:
             raise ValueError(f"PR verification command failed: {_failure_detail(completed)}")
+        return completed
+
+
+class MergePr:
+    """Re-verify a governed PR at merge time and record the immutable merge receipt."""
+
+    def __init__(
+        self,
+        store: Store,
+        *,
+        runner: ProjectRunner = run_project_command,
+        timeout_seconds: float = 300,
+    ) -> None:
+        self.store = store
+        self.runner = runner
+        self.timeout_seconds = timeout_seconds
+
+    def __call__(self, item: WorkItem) -> Outcome:
+        try:
+            request = MergePullRequest.from_payload(item.payload)
+            verified = self.store.get(request.verify_pr_work_id)
+            if verified is None or verified.state is not WorkState.SUCCEEDED:
+                raise ValueError("verify PR work item is missing or unsuccessful")
+            if verified.action != VERIFY_PR_ACTION:
+                raise ValueError("referenced work item is not a verify PR receipt")
+            git_root = Path(str(verified.result.get("git_root", ""))).resolve()
+            number = verified.result.get("pr_number")
+            expected_head = str(verified.result.get("head_sha", ""))
+            if (
+                not git_root.is_dir()
+                or isinstance(number, bool)
+                or not isinstance(number, int)
+                or not _SHA_RE.fullmatch(expected_head)
+            ):
+                raise ValueError("verify PR receipt is incomplete")
+
+            raw = self._run(
+                git_root,
+                [
+                    "gh", "pr", "view", str(number), "--json",
+                    "number,url,state,isDraft,mergeStateStatus,headRefOid,baseRefOid,statusCheckRollup",
+                ],
+            ).stdout
+            pr = json.loads(raw)
+            if pr.get("state") != "OPEN" or pr.get("isDraft") is not False:
+                raise ValueError("PR is not an open non-draft pull request")
+            if pr.get("headRefOid") != expected_head:
+                raise ValueError("PR head changed after verification")
+            checks = _parse_checks(pr.get("statusCheckRollup"))
+            required = {"Validate (sandbox)", "LWC unit tests", "PM Tracker + revops-dash verify"}
+            missing = sorted(required - set(checks))
+            if missing:
+                raise ValueError(f"required checks were not created: {', '.join(missing)}")
+            bad = sorted(
+                name
+                for name, conclusion in checks.items()
+                if conclusion not in {"SUCCESS", "NEUTRAL", "SKIPPED"}
+            )
+            if bad or checks["Validate (sandbox)"] != "SUCCESS":
+                raise ValueError("PR checks are no longer green")
+            self._run(git_root, ["git", "fetch", "origin", "main"])
+            current_main = self._run(
+                git_root, ["git", "rev-parse", "origin/main"]
+            ).stdout.strip()
+            if pr.get("baseRefOid") != current_main:
+                raise ValueError("PR base receipt is not current origin/main")
+            contains = self.runner(
+                ["git", "merge-base", "--is-ancestor", current_main, expected_head],
+                git_root,
+                self.timeout_seconds,
+            )
+            if contains.returncode != 0 or pr.get("mergeStateStatus") != "CLEAN":
+                raise ValueError("PR is not cleanly mergeable on current main")
+
+            self._run(
+                git_root,
+                [
+                    "gh", "pr", "merge", str(number), "--squash",
+                    "--match-head-commit", expected_head,
+                ],
+            )
+            merged_raw = self._run(
+                git_root,
+                [
+                    "gh", "pr", "view", str(number), "--json",
+                    "number,url,state,mergedAt,mergeCommit,headRefOid",
+                ],
+            ).stdout
+            merged = json.loads(merged_raw)
+            merge_commit = merged.get("mergeCommit")
+            merge_sha = merge_commit.get("oid") if isinstance(merge_commit, dict) else None
+            merged_at = merged.get("mergedAt")
+            if (
+                merged.get("state") != "MERGED"
+                or merged.get("headRefOid") != expected_head
+                or not isinstance(merge_sha, str)
+                or not _SHA_RE.fullmatch(merge_sha)
+                or not isinstance(merged_at, str)
+                or not merged_at
+            ):
+                raise ValueError("GitHub merge receipt is incomplete")
+            self._run(git_root, ["git", "fetch", "origin", "main"])
+            landed = self.runner(
+                ["git", "merge-base", "--is-ancestor", merge_sha, "origin/main"],
+                git_root,
+                self.timeout_seconds,
+            )
+            if landed.returncode != 0:
+                raise ValueError("merge commit is not present on current origin/main")
+        except (ValueError, OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+            return Outcome.failed(f"merge PR refused: {exc}")
+
+        result = {
+            "git_root": str(git_root),
+            "pr_number": number,
+            "pr_url": merged["url"],
+            "head_sha": expected_head,
+            "base_sha": current_main,
+            "merge_sha": merge_sha,
+            "merged_at": merged_at,
+            "verify_pr_work_id": request.verify_pr_work_id,
+        }
+        evidence = [
+            {
+                "kind": MERGE_PR_ACTION,
+                "repository": "ClearspeedRevOps/sfdc",
+                "pr_number": number,
+                "pr_url": merged["url"],
+                "head_sha": expected_head,
+                "base_sha": current_main,
+                "merge_sha": merge_sha,
+                "merged_at": merged_at,
+                "sandbox_validation": "SUCCESS",
+                "contains_current_main": True,
+                "merged": True,
+            }
+        ]
+        return Outcome.success(result, evidence)
+
+    def _run(self, cwd: Path, argv: Sequence[str]) -> CommandResult:
+        completed = self.runner(argv, cwd, self.timeout_seconds)
+        if completed.returncode != 0:
+            raise ValueError(f"PR merge command failed: {_failure_detail(completed)}")
         return completed
 
 

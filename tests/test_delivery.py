@@ -8,10 +8,13 @@ import pytest
 from atlas_next import Engine, Store, WorkState
 from atlas_next.delivery import (
     COMMIT_SOURCE_ACTION,
+    MERGE_PR_ACTION,
     OPEN_PR_ACTION,
     VERIFY_PR_ACTION,
     CommitSource,
     CommitSourceRequest,
+    MergePr,
+    MergePullRequest,
     OpenPr,
     OpenPullRequest,
     VerifyPr,
@@ -327,3 +330,133 @@ def test_parse_checks_rejects_pending_duplicate_or_zero_population():
                 {"name": "same", "status": "COMPLETED", "conclusion": "SUCCESS"},
             ]
         )
+
+
+def test_merge_pr_contract_has_only_verified_receipt():
+    with pytest.raises(ValueError, match="unexpected keys: command"):
+        MergePullRequest.from_payload(
+            {"verify_pr_work_id": "one", "command": "gh pr merge"}
+        )
+
+
+def test_merge_pr_rechecks_head_and_current_main_then_records_receipt(tmp_path):
+    git_root = tmp_path / "worktree"
+    git_root.mkdir()
+    head = "a" * 40
+    base = "b" * 40
+    merge_sha = "c" * 40
+    checks = [
+        {"name": "Validate (sandbox)", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {"name": "LWC unit tests", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {
+            "name": "PM Tracker + revops-dash verify",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+        },
+    ]
+    open_pr = {
+        "number": 999,
+        "url": "https://github.com/ClearspeedRevOps/sfdc/pull/999",
+        "state": "OPEN",
+        "isDraft": False,
+        "mergeStateStatus": "CLEAN",
+        "headRefOid": head,
+        "baseRefOid": base,
+        "statusCheckRollup": checks,
+    }
+    merged_pr = {
+        "number": 999,
+        "url": "https://github.com/ClearspeedRevOps/sfdc/pull/999",
+        "state": "MERGED",
+        "mergedAt": "2026-08-30T01:02:03Z",
+        "mergeCommit": {"oid": merge_sha},
+        "headRefOid": head,
+    }
+    commands = []
+    with Store(tmp_path / "state.sqlite3") as store:
+        verified = store.enqueue(VERIFY_PR_ACTION, {})
+        assert store.claim(verified.id, "verifier") is not None
+        store.succeed(
+            verified.id,
+            "verifier",
+            result={
+                "git_root": str(git_root),
+                "pr_number": 999,
+                "head_sha": head,
+            },
+            evidence=[{"kind": VERIFY_PR_ACTION}],
+        )
+        view_count = 0
+
+        def runner(argv, _cwd, _timeout):
+            nonlocal view_count
+            commands.append(list(argv))
+            if argv[:3] == ["gh", "pr", "view"]:
+                view_count += 1
+                return CommandResult(
+                    0, json.dumps(open_pr if view_count == 1 else merged_pr), ""
+                )
+            if argv == ["git", "rev-parse", "origin/main"]:
+                return CommandResult(0, base, "")
+            return CommandResult(0, "", "")
+
+        item = store.enqueue(MERGE_PR_ACTION, {"verify_pr_work_id": verified.id})
+        completed = Engine(
+            store,
+            {MERGE_PR_ACTION: MergePr(store, runner=runner)},
+            worker_id="test",
+            execution_enabled=True,
+        ).run_once(work_id=item.id).item
+
+    assert [
+        "gh", "pr", "merge", "999", "--squash", "--match-head-commit", head
+    ] in commands
+    assert completed is not None and completed.state is WorkState.SUCCEEDED
+    assert completed.result["merge_sha"] == merge_sha
+    assert completed.evidence[0]["merged"] is True
+
+
+def test_merge_pr_refuses_changed_head_before_merge(tmp_path):
+    git_root = tmp_path / "worktree"
+    git_root.mkdir()
+    head = "a" * 40
+    merged = False
+    with Store(tmp_path / "state.sqlite3") as store:
+        verified = store.enqueue(VERIFY_PR_ACTION, {})
+        assert store.claim(verified.id, "verifier") is not None
+        store.succeed(
+            verified.id,
+            "verifier",
+            result={"git_root": str(git_root), "pr_number": 999, "head_sha": head},
+            evidence=[{"kind": VERIFY_PR_ACTION}],
+        )
+
+        def runner(argv, _cwd, _timeout):
+            nonlocal merged
+            if argv[:3] == ["gh", "pr", "merge"]:
+                merged = True
+            if argv[:3] == ["gh", "pr", "view"]:
+                return CommandResult(
+                    0,
+                    json.dumps(
+                        {
+                            "state": "OPEN",
+                            "isDraft": False,
+                            "headRefOid": "d" * 40,
+                        }
+                    ),
+                    "",
+                )
+            return CommandResult(0, "", "")
+
+        item = store.enqueue(MERGE_PR_ACTION, {"verify_pr_work_id": verified.id})
+        completed = Engine(
+            store,
+            {MERGE_PR_ACTION: MergePr(store, runner=runner)},
+            worker_id="test",
+            execution_enabled=True,
+        ).run_once(work_id=item.id).item
+
+    assert merged is False
+    assert completed is not None and completed.state is WorkState.FAILED
+    assert "head changed" in (completed.error or "")

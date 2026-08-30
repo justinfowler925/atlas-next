@@ -6,9 +6,11 @@ from pathlib import Path
 
 from .delivery import (
     COMMIT_SOURCE_ACTION,
+    MERGE_PR_ACTION,
     OPEN_PR_ACTION,
     VERIFY_PR_ACTION,
     CommitSource,
+    MergePr,
     OpenPr,
     VerifyPr,
 )
@@ -136,6 +138,11 @@ def _parser() -> argparse.ArgumentParser:
         help="wait for required PR checks and prove current-main merge readiness",
     )
     verify_pr.add_argument("open_pr_work_id")
+    merge_pr = sub.add_parser(
+        "merge-pr",
+        help="re-verify and squash-merge one verified current-main SFDC pull request",
+    )
+    merge_pr.add_argument("verify_pr_work_id")
     return parser
 
 
@@ -288,6 +295,13 @@ def main(argv: list[str] | None = None) -> int:
                 VERIFY_PR_ACTION,
                 {"open_pr_work_id": args.open_pr_work_id},
                 VerifyPr(store),
+            )
+        if args.command == "merge-pr":
+            return _execute(
+                store,
+                MERGE_PR_ACTION,
+                {"verify_pr_work_id": args.verify_pr_work_id},
+                MergePr(store),
             )
         report = snapshot(
             store,
