@@ -37,6 +37,7 @@ from .salesforce_metadata import (
     SalesforceSourceRetrieve,
 )
 from .store import Store
+from .source_author import AUTHOR_SOURCE_ACTION, AuthorSource
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -122,6 +123,14 @@ def _parser() -> argparse.ArgumentParser:
     retrieve.add_argument("name")
     retrieve.add_argument("--partial-alias", default="dod-check")
     retrieve.add_argument("--project-dir", type=Path, required=True)
+    author = sub.add_parser(
+        "salesforce-author-source",
+        help="replace one hash-locked file from a successful source retrieve receipt",
+    )
+    author.add_argument("retrieve_work_id")
+    author.add_argument("--path", required=True)
+    author.add_argument("--expected-sha256", required=True)
+    author.add_argument("--content-file", type=Path, required=True)
     commit = sub.add_parser(
         "commit-source",
         help="commit only files proven by successful source-producing work items",
@@ -277,6 +286,18 @@ def main(argv: list[str] | None = None) -> int:
                     partial_alias=args.partial_alias,
                     project_dir=args.project_dir,
                 ),
+            )
+        if args.command == "salesforce-author-source":
+            return _execute(
+                store,
+                AUTHOR_SOURCE_ACTION,
+                {
+                    "retrieve_work_id": args.retrieve_work_id,
+                    "path": args.path,
+                    "expected_sha256": args.expected_sha256,
+                    "content": args.content_file.read_text(encoding="utf-8"),
+                },
+                AuthorSource(store),
             )
         if args.command == "commit-source":
             return _execute(

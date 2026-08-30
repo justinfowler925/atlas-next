@@ -379,8 +379,23 @@ class SalesforceSourceRetrieve:
                     f"{_failure_detail(completed)}"
                 )
             _validate_retrieve_response(completed.stdout)
+            retrieved = _retrieved_source_paths(
+                completed.stdout,
+                git_root=git_root,
+                project_prefix=project_prefix,
+                metadata_type=request.metadata_type,
+                component_name=request.component_name,
+            )
             status = self._git(["git", "status", "--porcelain=v1"]).stdout
-            changed = _validate_retrieved_changes(status, git_root, project_prefix)
+            changed = _validate_retrieved_changes(
+                status, git_root, project_prefix, allow_empty=bool(retrieved)
+            )
+            if retrieved:
+                if not set(changed) <= set(retrieved):
+                    raise ValueError("source retrieve dirt exceeds the returned component files")
+                files_to_record = retrieved
+            else:
+                files_to_record = changed
         except (ValueError, OSError, subprocess.SubprocessError) as exc:
             return Outcome.failed(f"salesforce source retrieve refused: {exc}")
 
@@ -390,7 +405,7 @@ class SalesforceSourceRetrieve:
                 "sha256": hashlib.sha256((git_root / path).read_bytes()).hexdigest(),
                 "bytes": (git_root / path).stat().st_size,
             }
-            for path in changed
+            for path in files_to_record
         ]
         result = {
             "environment": "partial",
@@ -401,6 +416,7 @@ class SalesforceSourceRetrieve:
             "branch": branch,
             "files": files,
             "file_count": len(files),
+            "dirty_files": changed,
         }
         evidence = [
             {
@@ -460,6 +476,49 @@ def _validate_retrieve_response(stdout: str) -> None:
         raise ValueError("metadata retrieve did not report Succeeded and done")
 
 
+def _retrieved_source_paths(
+    stdout: str,
+    *,
+    git_root: Path,
+    project_prefix: str,
+    metadata_type: str,
+    component_name: str,
+) -> list[str]:
+    """Return the CLI's exact component files, including when retrieval is git-clean."""
+    result = json.loads(stdout)["result"]
+    rows = result.get("files")
+    if rows is None:
+        return []
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 20:
+        raise ValueError("source retrieve returned an invalid file population")
+    allowed_root = f"{project_prefix}/force-app/main/default/"
+    paths = []
+    for row in rows:
+        if (
+            not isinstance(row, dict)
+            or row.get("type") != metadata_type
+            or row.get("fullName") != component_name
+        ):
+            raise ValueError("source retrieve returned a different metadata component")
+        raw_path = row.get("filePath")
+        if not isinstance(raw_path, str) or not raw_path:
+            raise ValueError("source retrieve returned an invalid file path")
+        absolute = Path(raw_path).resolve()
+        if (
+            not absolute.is_relative_to(git_root)
+            or not absolute.is_file()
+            or absolute.is_symlink()
+        ):
+            raise ValueError("source retrieve returned a non-regular project file")
+        relative = absolute.relative_to(git_root).as_posix()
+        if not relative.startswith(allowed_root):
+            raise ValueError("source retrieve returned an out-of-scope project file")
+        if absolute.stat().st_size > 5_000_000 or relative in paths:
+            raise ValueError("source retrieve returned an invalid or duplicate file")
+        paths.append(relative)
+    return sorted(paths)
+
+
 def _artifact_manifest(output_dir: Path) -> dict[str, str]:
     files = []
     total_bytes = 0
@@ -493,9 +552,11 @@ def _manifest_hash(manifest: dict[str, str]) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
-def _validate_retrieved_changes(status: str, git_root: Path, project_prefix: str) -> list[str]:
+def _validate_retrieved_changes(
+    status: str, git_root: Path, project_prefix: str, *, allow_empty: bool = False
+) -> list[str]:
     lines = [line for line in status.splitlines() if line]
-    if not lines:
+    if not lines and not allow_empty:
         raise ValueError("source retrieve produced zero git changes")
     if len(lines) > 20:
         raise ValueError("source retrieve changed more than 20 files")

@@ -14,6 +14,7 @@ from .engine import Outcome
 from .models import WorkItem, WorkState
 from .salesforce import CommandResult, _failure_detail
 from .salesforce_metadata import SOURCE_RETRIEVE_ACTION
+from .source_author import AUTHOR_SOURCE_ACTION
 from .store import Store
 
 
@@ -231,7 +232,8 @@ class CommitSource:
             if any(source is None for source in sources):
                 raise ValueError("one or more source work items do not exist")
             if any(
-                source.state is not WorkState.SUCCEEDED or source.action != SOURCE_RETRIEVE_ACTION
+                source.state is not WorkState.SUCCEEDED
+                or source.action not in {SOURCE_RETRIEVE_ACTION, AUTHOR_SOURCE_ACTION}
                 for source in sources
                 if source is not None
             ):

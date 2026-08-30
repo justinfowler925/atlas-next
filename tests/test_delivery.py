@@ -25,6 +25,7 @@ from atlas_next.delivery import (
 )
 from atlas_next.salesforce import CommandResult
 from atlas_next.salesforce_metadata import SOURCE_RETRIEVE_ACTION
+from atlas_next.source_author import AUTHOR_SOURCE_ACTION
 
 
 def test_commit_contract_rejects_commands_paths_and_bad_messages():
@@ -38,7 +39,8 @@ def test_commit_contract_rejects_commands_paths_and_bad_messages():
         )
 
 
-def test_commit_stages_exact_evidence_linked_files_and_returns_sha(tmp_path):
+@pytest.mark.parametrize("source_action", [SOURCE_RETRIEVE_ACTION, AUTHOR_SOURCE_ACTION])
+def test_commit_stages_exact_evidence_linked_files_and_returns_sha(tmp_path, source_action):
     git_root = tmp_path / "worktree"
     path = "salesforce/force-app/main/default/classes/Service.cls"
     source_file = git_root / path
@@ -50,7 +52,7 @@ def test_commit_stages_exact_evidence_linked_files_and_returns_sha(tmp_path):
     commands = []
 
     with Store(tmp_path / "state.sqlite3") as store:
-        source = store.enqueue(SOURCE_RETRIEVE_ACTION, {})
+        source = store.enqueue(source_action, {})
         claimed = store.claim(source.id, "producer")
         assert claimed is not None
         store.succeed(
@@ -61,7 +63,7 @@ def test_commit_stages_exact_evidence_linked_files_and_returns_sha(tmp_path):
                 "branch": "justin-fowler/proof",
                 "files": [{"path": path, "sha256": digest}],
             },
-            evidence=[{"kind": SOURCE_RETRIEVE_ACTION}],
+            evidence=[{"kind": source_action}],
         )
         committed = False
 

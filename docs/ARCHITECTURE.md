@@ -90,6 +90,12 @@ worktree. The postcondition is a non-zero bounded set of regular files only
 under that project's `force-app/main/default`; deletions, renames, unrelated
 paths, primary/main checkouts, wildcard components, and production are refused.
 
+`salesforce.author_source` consumes that exact retrieve receipt, re-hashes every
+component file, and replaces one receipt-listed path only when its baseline hash
+still matches. It rejects unrelated dirt, traversal, malformed XML, oversized
+content, renamed Apex declarations, and identical replacements. It writes only
+the isolated branch; deployment still requires the governed delivery chain.
+
 `delivery.commit_source` consumes successful source-producing ledger item IDs,
 re-hashes every proven file, requires the complete worktree dirt population to
 equal those files, stages exactly that set, and records the resulting commit SHA.
