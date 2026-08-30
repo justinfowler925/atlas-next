@@ -28,6 +28,7 @@ from atlas_next.salesforce_metadata import SOURCE_RETRIEVE_ACTION
 from atlas_next.source_author import AUTHOR_SOURCE_ACTION
 from atlas_next.flow_source import CREATE_FLOW_SOURCE_ACTION
 from atlas_next.lwc_source import CREATE_LWC_SOURCE_ACTION
+from atlas_next.report_source import CREATE_REPORT_SOURCE_ACTION
 
 
 def test_commit_contract_rejects_commands_paths_and_bad_messages():
@@ -48,6 +49,7 @@ def test_commit_contract_rejects_commands_paths_and_bad_messages():
         AUTHOR_SOURCE_ACTION,
         CREATE_FLOW_SOURCE_ACTION,
         CREATE_LWC_SOURCE_ACTION,
+        CREATE_REPORT_SOURCE_ACTION,
     ],
 )
 def test_commit_stages_exact_evidence_linked_files_and_returns_sha(tmp_path, source_action):

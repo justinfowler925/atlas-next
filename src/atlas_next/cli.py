@@ -41,6 +41,7 @@ from .source_author import AUTHOR_SOURCE_ACTION, AuthorSource
 from .flow_source import CREATE_FLOW_SOURCE_ACTION, CreateFlowSource
 from .lwc_source import CREATE_LWC_SOURCE_ACTION, CreateLwcSource
 from .salesforce_lwc import VERIFY_LWC_DEPLOYMENT_ACTION, VerifyLwcDeployment
+from .report_source import CREATE_REPORT_SOURCE_ACTION, CreateReportSource
 from .salesforce_flow import (
     RUN_CREATED_FLOW_ACTION,
     VERIFY_FLOW_ACTIVATION_ACTION,
@@ -202,6 +203,13 @@ def _parser() -> argparse.ArgumentParser:
     verify_lwc.add_argument("deploy_work_id")
     verify_lwc.add_argument("source_work_id")
     verify_lwc.add_argument("--partial-alias", default="dod-check")
+    create_report = sub.add_parser(
+        "salesforce-create-report-source",
+        help="create one bounded public Salesforce report in a clean isolated worktree",
+    )
+    create_report.add_argument("name")
+    create_report.add_argument("--content-file", type=Path, required=True)
+    create_report.add_argument("--project-dir", type=Path, required=True)
     commit = sub.add_parser(
         "commit-source",
         help="commit only files proven by successful source-producing work items",
@@ -454,6 +462,16 @@ def main(argv: list[str] | None = None) -> int:
                     "source_work_id": args.source_work_id,
                 },
                 VerifyLwcDeployment(store, partial_alias=args.partial_alias),
+            )
+        if args.command == "salesforce-create-report-source":
+            return _execute(
+                store,
+                CREATE_REPORT_SOURCE_ACTION,
+                {
+                    "name": args.name,
+                    "content": args.content_file.read_text(encoding="utf-8"),
+                },
+                CreateReportSource(project_dir=args.project_dir),
             )
         if args.command == "commit-source":
             return _execute(

@@ -118,6 +118,9 @@ atlas-next --db /tmp/atlas-next.sqlite salesforce-create-lwc-source \
   --project-dir /path/to/isolated-sfdc-worktree/salesforce
 atlas-next --db /tmp/atlas-next.sqlite salesforce-verify-lwc-deployment \
   <deploy-work-id> <lwc-source-work-id>
+atlas-next --db /tmp/atlas-next.sqlite salesforce-create-report-source \
+  Atlas_Acceptance_Opportunity_Report --content-file /path/to/report-meta.xml \
+  --project-dir /path/to/isolated-sfdc-worktree/salesforce
 atlas-next --db /tmp/atlas-next.sqlite commit-source <source-work-id> \
   --message 'chore: capture Partial acceptance service'
 atlas-next --db /tmp/atlas-next.sqlite open-pr <commit-work-id> \

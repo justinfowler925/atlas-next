@@ -126,6 +126,11 @@ verification, merge, and sandbox-deploy receipts, requires the repository-wide
 `LWC unit tests` gate to be successful, and independently finds exactly one matching
 bundle with a component ID in live Partial metadata. Production is unavailable.
 
+`salesforce.create_report_source` creates one public report in the deterministic
+`unfiled$public` folder. It bounds and validates the report XML root, columns,
+report type, format, scope, and detail mode, requires a clean linked worktree,
+and writes no org directly; delivery still requires the governed Partial CI chain.
+
 `delivery.commit_source` consumes successful source-producing ledger item IDs,
 re-hashes every proven file, requires the complete worktree dirt population to
 equal those files, stages exactly that set, and records the resulting commit SHA.
