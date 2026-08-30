@@ -7,4 +7,7 @@ __pycache__/
 dist/
 build/
 *.egg-info/
-
+.env
+.env.*
+*.key
+*.pem
