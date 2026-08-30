@@ -49,6 +49,10 @@ Linear, GitHub, Slack,
 deployment, scheduling, and LLM adapters remain absent. The old Atlas is not a
 runtime dependency.
 
+Historical coverage is measured against 163 real Salesforce workflows from the
+legacy 200-ticket corpus. See `docs/HISTORICAL_COVERAGE.md`; current strict
+coverage is 13/163 (7.98%), not yet the 80% target.
+
 ## Verify
 
 ```bash
